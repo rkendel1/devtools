@@ -13,4 +13,10 @@ describe('redaction', () => {
     expect(changed).toBe(true)
     expect(redacted).toContain('[REDACTED]')
   })
+
+  it('redacts user-configured sensitive fields', () => {
+    const { redacted, changed } = redactText('{"accountId":"customer-42"}', ['accountId'])
+    expect(changed).toBe(true)
+    expect(redacted).toBe('{"accountId":"[REDACTED]"}')
+  })
 })

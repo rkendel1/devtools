@@ -18,6 +18,7 @@ export interface NetworkRequestSnapshot {
     functionName?: string
   }
   timingMs?: number
+  mimeType?: string
 }
 
 export interface ConsoleEvent {
@@ -27,6 +28,23 @@ export interface ConsoleEvent {
   line?: number
   stack?: string
   ts: number
+}
+
+export interface PrivacySettings {
+  sensitiveKeys: string[]
+  includeHeaders: boolean
+  includeBodies: boolean
+}
+
+export interface EvidenceBundle {
+  requestHeaders?: Record<string, string>
+  responseHeaders?: Record<string, string>
+  requestBody?: string
+  responseBody?: string
+  runtimeEvents: ConsoleEvent[]
+  environment?: { pageUrl?: string; userAgent?: string; viewport?: string }
+  screenshot?: string
+  reproductionSteps: string[]
 }
 
 export interface TraceStep {
@@ -63,6 +81,7 @@ export interface EvidenceGraph {
   anomalies: string[]
   trace: TraceStep[]
   redactionApplied: boolean
+  bundle?: EvidenceBundle
 }
 
 export interface InvestigationResult {
@@ -80,4 +99,11 @@ export interface InvestigationRecord {
   requestUrl: string
   graph: EvidenceGraph
   result: InvestigationResult
+  name?: string
+  pinned?: boolean
+  fingerprint?: string
+  occurrenceCount?: number
+  firstSeenAt?: number
+  lastSeenAt?: number
+  localAi?: { model: string; findingId: string; generatedAt: number }
 }

@@ -45,4 +45,19 @@ describe('buildEvidenceGraph', () => {
 
     expect(graph.anomalies.some((item) => item.includes('requested'))).toBe(true)
   })
+
+  it('creates a redacted evidence bundle honoring privacy controls', () => {
+    const request = makeRequest({
+      requestHeaders: { Authorization: 'Bearer secret', Accept: 'application/json' },
+      responseBody: '{"token":"secret"}',
+    })
+    const graph = buildEvidenceGraph(request, undefined, [request], [], {
+      sensitiveKeys: [], includeHeaders: true, includeBodies: false,
+    }, { pageUrl: 'https://example.test' })
+
+    expect(graph.bundle?.requestHeaders?.Authorization).toBe('[REDACTED]')
+    expect(graph.bundle?.requestHeaders?.Accept).toBe('application/json')
+    expect(graph.bundle?.responseBody).toBeUndefined()
+    expect(graph.bundle?.environment?.pageUrl).toBe('https://example.test')
+  })
 })

@@ -1,4 +1,4 @@
-import type { ConsoleEvent, EvidenceGraph, JsonObject, NetworkRequestSnapshot, TraceStep } from './types'
+import type { ConsoleEvent, EvidenceGraph, JsonObject, NetworkRequestSnapshot, PrivacySettings, TraceStep } from './types'
 import { redactHeaders, redactText } from './redaction'
 
 function parseJsonObject(input: string | undefined): JsonObject | undefined {
@@ -111,17 +111,20 @@ export function buildEvidenceGraph(
   successfulPeer: NetworkRequestSnapshot | undefined,
   allRequests: NetworkRequestSnapshot[],
   consoleEvents: ConsoleEvent[],
+  privacy: PrivacySettings = { sensitiveKeys: [], includeHeaders: true, includeBodies: true },
+  environment?: { pageUrl?: string; userAgent?: string; viewport?: string },
+  screenshot?: string,
 ): EvidenceGraph {
-  const requestHeadersResult = redactHeaders(request.requestHeaders)
-  const responseHeadersResult = redactHeaders(request.responseHeaders)
-  const requestBodyResult = redactText(request.requestBody)
-  const responseBodyResult = redactText(request.responseBody)
+  const requestHeadersResult = redactHeaders(request.requestHeaders, privacy.sensitiveKeys)
+  const responseHeadersResult = redactHeaders(request.responseHeaders, privacy.sensitiveKeys)
+  const requestBodyResult = redactText(request.requestBody, privacy.sensitiveKeys)
+  const responseBodyResult = redactText(request.responseBody, privacy.sensitiveKeys)
 
   const currentBodyJson = parseJsonObject(requestBodyResult.redacted)
   const successBodyJson = parseJsonObject(successfulPeer?.requestBody)
 
   const relatedEvents = consoleEvents
-    .filter((event) => event.ts >= request.startedAt - 1000 && event.ts <= (request.endedAt ?? request.startedAt + 15_000))
+    .filter((event) => event.ts >= request.startedAt - 1000 && event.ts <= (request.endedAt ?? request.startedAt) + 15_000)
     .slice(-6)
 
   const semanticDiff = diffObjects(successBodyJson, currentBodyJson)
@@ -159,5 +162,19 @@ export function buildEvidenceGraph(
       responseHeadersResult.changed ||
       requestBodyResult.changed ||
       responseBodyResult.changed,
+    bundle: {
+      requestHeaders: privacy.includeHeaders ? requestHeadersResult.redacted : undefined,
+      responseHeaders: privacy.includeHeaders ? responseHeadersResult.redacted : undefined,
+      requestBody: privacy.includeBodies ? requestBodyResult.redacted : undefined,
+      responseBody: privacy.includeBodies ? responseBodyResult.redacted : undefined,
+      runtimeEvents: relatedEvents.map((event) => ({ ...event, stack: redactText(event.stack, privacy.sensitiveKeys).redacted })),
+      environment,
+      screenshot,
+      reproductionSteps: [
+        `Open ${environment?.pageUrl ?? 'the inspected page'}.`,
+        `Trigger ${request.method} ${request.url}.`,
+        `Observe response ${request.status} ${request.statusText}${relatedEvents.length ? ` and runtime event: ${relatedEvents[0].message}` : ''}.`,
+      ],
+    },
   }
 }

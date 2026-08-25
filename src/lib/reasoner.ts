@@ -18,7 +18,10 @@ export function reasonFromEvidence(graph: EvidenceGraph): InvestigationResult {
   let confidence = 0.62
 
   const typeDiff = (graph.comparison?.semanticDiff ?? []).find((entry) => entry.includes('changed type'))
-  if (typeDiff && graph.request.status >= 400) {
+  if (graph.request.status === 0 && graph.relatedEvents.length) {
+    diagnosis = 'Likely cause: an unhandled client-side runtime failure interrupted the page.'
+    confidence = 0.88
+  } else if (typeDiff && graph.request.status >= 400) {
     diagnosis = 'Likely cause: API contract mismatch between expected and actual payload schema.'
     confidence = 0.94
   } else if (graph.request.status === 401 || graph.request.status === 403) {

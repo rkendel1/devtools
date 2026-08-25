@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatInvestigationReport } from './report'
+import { formatInvestigationReport, formatJiraReport, formatJsonReport, formatMarkdownReport } from './report'
 import type { InvestigationRecord } from './types'
 
 describe('formatInvestigationReport', () => {
@@ -33,5 +33,8 @@ describe('formatInvestigationReport', () => {
     expect(report).toContain('app.js:42')
     expect(report).toContain('view.js:9')
     expect(report).toContain('Confidence: 82%')
+    expect(formatMarkdownReport(record)).toContain('## Evidence')
+    expect(formatJiraReport(record)).toContain('h2. Evidence')
+    expect(JSON.parse(formatJsonReport(record)).id).toBe('one')
   })
 })

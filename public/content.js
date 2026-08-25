@@ -1,19 +1,7 @@
-(() => {
-  window.addEventListener(
-    'error',
-    (event) => {
-      chrome.runtime.sendMessage({
-        type: 'runtime-investigator:page-error',
-        payload: {
-          message: event.message,
-          source: event.filename,
-          line: event.lineno,
-          column: event.colno,
-          stack: event.error?.stack ?? null,
-          ts: Date.now(),
-        },
-      })
-    },
-    true,
-  )
-})()
+window.addEventListener('runtime-investigator:event', (event) => {
+  try {
+    chrome.runtime.sendMessage({ type: 'runtime-investigator:event', payload: JSON.parse(event.detail) })
+  } catch {
+    // Ignore malformed page-world events.
+  }
+})

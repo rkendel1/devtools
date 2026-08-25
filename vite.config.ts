@@ -9,6 +9,7 @@ export default defineConfig({
   resolve: {
     alias: {
       'runtime_investigator_wasm': path.resolve(rootDir, 'wasm-engine/pkg'),
+      'module': path.resolve(rootDir, 'src/shims/module.ts'),
     },
   },
   build: {
@@ -16,6 +17,7 @@ export default defineConfig({
       input: {
         panel: path.resolve(rootDir, 'panel.html'),
         devtools: path.resolve(rootDir, 'devtools.html'),
+        offscreen: path.resolve(rootDir, 'offscreen.html'),
       },
     },
   },

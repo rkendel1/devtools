@@ -1,4 +1,5 @@
 import type { ConsoleEvent, NetworkRequestSnapshot } from './types'
+import { truncateHeaders, truncateText } from './retention'
 
 type ChromeRequest = {
   request: {
@@ -20,6 +21,36 @@ type ChromeRequest = {
   getContent: (callback: (content: string, encoding: string) => void) => void
 }
 
+function requestToSnapshot(entry: unknown): Promise<NetworkRequestSnapshot> {
+  return new Promise((resolve) => {
+    const requestRef = entry as ChromeRequest
+    const startedAt = new Date(requestRef.startedDateTime).getTime()
+    requestRef.getContent((content) => {
+      const frame = requestRef.initiator?.stack?.callFrames?.[0]
+      resolve({
+        id: `${requestRef.request.method}:${requestRef.request.url}:${startedAt}`,
+        startedAt,
+        endedAt: startedAt + Math.round(requestRef.time ?? 0),
+        method: requestRef.request.method,
+        url: requestRef.request.url,
+        status: requestRef.response.status,
+        statusText: requestRef.response.statusText,
+        requestHeaders: truncateHeaders(headersToMap(requestRef.request.headers)),
+        responseHeaders: truncateHeaders(headersToMap(requestRef.response.headers)),
+        requestBody: truncateText(requestRef.request.postData?.text),
+        responseBody: truncateText(content),
+        initiator: {
+          source: frame?.url,
+          line: typeof frame?.lineNumber === 'number' ? frame.lineNumber + 1 : undefined,
+          functionName: frame?.functionName,
+        },
+        timingMs: requestRef.time,
+        mimeType: requestRef.response.content?.mimeType,
+      })
+    })
+  })
+}
+
 function headersToMap(headers: Array<{ name: string; value?: string }> | undefined): Record<string, string> {
   return (headers ?? []).reduce<Record<string, string>>((acc, header) => {
     acc[header.name] = header.value ?? ''
@@ -39,39 +70,7 @@ export async function captureRequests(limit = 200): Promise<NetworkRequestSnapsh
   return new Promise((resolve) => {
     chrome.devtools.network.getHAR(async (harLog: { entries: Array<unknown> }) => {
       const entries = harLog.entries.slice(-limit)
-      const output = await Promise.all(
-        entries.map(
-          (entry: unknown) =>
-            new Promise<NetworkRequestSnapshot>((entryResolve) => {
-              const requestRef = entry as ChromeRequest
-              const startedAt = new Date(requestRef.startedDateTime).getTime()
-
-              requestRef.getContent((content) => {
-                const frame = requestRef.initiator?.stack?.callFrames?.[0]
-
-                entryResolve({
-                  id: `${requestRef.request.method}:${requestRef.request.url}:${startedAt}`,
-                  startedAt,
-                  endedAt: startedAt + Math.round(requestRef.time ?? 0),
-                  method: requestRef.request.method,
-                  url: requestRef.request.url,
-                  status: requestRef.response.status,
-                  statusText: requestRef.response.statusText,
-                  requestHeaders: headersToMap(requestRef.request.headers),
-                  responseHeaders: headersToMap(requestRef.response.headers),
-                  requestBody: requestRef.request.postData?.text,
-                  responseBody: content,
-                  initiator: {
-                    source: frame?.url,
-                    line: typeof frame?.lineNumber === 'number' ? frame.lineNumber + 1 : undefined,
-                    functionName: frame?.functionName,
-                  },
-                  timingMs: requestRef.time,
-                })
-              })
-            }),
-        ),
-      )
+      const output = await Promise.all(entries.map(requestToSnapshot))
 
       resolve(output)
     })
@@ -83,63 +82,48 @@ export async function captureConsoleEvents(limit = 50): Promise<ConsoleEvent[]> 
     return []
   }
 
-  return new Promise((resolve) => {
-    chrome.devtools.inspectedWindow.eval(
-      `(() => {
-        const logs = window.__runtimeInvestigatorConsoleBuffer || [];
-        return logs.slice(-${limit});
-      })()`,
-      (result: unknown) => {
-        if (chrome.runtime.lastError) {
-          resolve([])
-          return
-        }
-
-        const normalized = Array.isArray(result)
-          ? result.map((event) => ({
-              type: 'runtime.error' as const,
-              message: String(event.message ?? 'Runtime error'),
-              source: event.source ? String(event.source) : undefined,
-              line: typeof event.line === 'number' ? event.line : undefined,
-              stack: event.stack ? String(event.stack) : undefined,
-              ts: typeof event.ts === 'number' ? event.ts : Date.now(),
-            }))
-          : []
-
-        resolve(normalized)
-      },
-    )
-  })
+  return new Promise((resolve) => chrome.runtime.sendMessage(
+    { type: 'runtime-investigator:get-events', tabId: chrome.devtools.inspectedWindow.tabId },
+    (response) => resolve((response?.events ?? []).slice(-limit)),
+  ))
 }
 
 export function primeConsoleCapture(): void {
-  if (!hasChromeDevtools()) return
+  // Capture is installed at document_start by page-capture.js.
+}
 
-  chrome.devtools.inspectedWindow.eval(`
-    (() => {
-      if (window.__runtimeInvestigatorPatched) return;
-      window.__runtimeInvestigatorPatched = true;
-      window.__runtimeInvestigatorConsoleBuffer = window.__runtimeInvestigatorConsoleBuffer || [];
-      const push = (entry) => {
-        window.__runtimeInvestigatorConsoleBuffer.push(entry);
-        if (window.__runtimeInvestigatorConsoleBuffer.length > 300) {
-          window.__runtimeInvestigatorConsoleBuffer = window.__runtimeInvestigatorConsoleBuffer.slice(-300);
-        }
-      };
-      const originalError = console.error.bind(console);
-      console.error = (...args) => {
-        push({ message: args.map(String).join(' '), ts: Date.now(), source: 'console.error' });
-        originalError(...args);
-      };
-      window.addEventListener('error', (event) => {
-        push({
-          message: event.message,
-          source: event.filename,
-          line: event.lineno,
-          stack: event.error?.stack,
-          ts: Date.now(),
-        });
-      }, true);
-    })();
-  `)
+export function subscribeToRequests(onRequest: (request: NetworkRequestSnapshot) => void): () => void {
+  if (!hasChromeDevtools()) return () => undefined
+  const listener = (request: unknown) => void requestToSnapshot(request).then(onRequest)
+  chrome.devtools.network.onRequestFinished.addListener(listener)
+  return () => chrome.devtools.network.onRequestFinished.removeListener(listener)
+}
+
+export async function captureEnvironment(): Promise<{ pageUrl?: string; userAgent?: string; viewport?: string }> {
+  if (!hasChromeDevtools()) return {}
+  return new Promise((resolve) => chrome.devtools.inspectedWindow.eval(
+    `({ pageUrl: location.href, userAgent: navigator.userAgent, viewport: innerWidth + 'x' + innerHeight })`,
+    (result) => resolve((result as { pageUrl?: string; userAgent?: string; viewport?: string }) ?? {}),
+  ))
+}
+
+export async function captureScreenshot(): Promise<string | undefined> {
+  if (!hasChromeDevtools() || !chrome.tabs?.captureVisibleTab) return undefined
+  return new Promise((resolve) => chrome.tabs.captureVisibleTab({ format: 'png' }, (dataUrl) => {
+    resolve(chrome.runtime.lastError ? undefined : dataUrl)
+  }))
+}
+
+export function openSourceLocation(source: string, line?: number): void {
+  chrome.devtools.panels.openResource(source, Math.max(0, (line ?? 1) - 1))
+}
+
+export function endpointKey(request: Pick<NetworkRequestSnapshot, 'method' | 'url'>): string {
+  try {
+    const url = new URL(request.url)
+    const path = url.pathname.replace(/\b[0-9a-f]{8}-[0-9a-f-]{27,}\b/gi, ':id').replace(/\/\d+(?=\/|$)/g, '/:id')
+    return `${request.method} ${url.origin}${path}`
+  } catch {
+    return `${request.method} ${request.url.replace(/\/\d+(?=\/|$)/g, '/:id')}`
+  }
 }
