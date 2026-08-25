@@ -234,9 +234,79 @@ Hypothesis (<70%)            - Speculation (AI)
 | Tests | 300 | Test suites |
 | **Total** | **2,800** | **9 files + styling** |
 
-## Next Phases (Planned)
+---
 
-### Phase 4: Queryable Investigations
+### Phase 4: Replay (Contract + Engine) ✅ FOUNDATION COMPLETE
+**Goal:** Actually reproduce failures from captured evidence
+
+**What was built:**
+- `replayContract.ts` (220 lines)
+  - `ReplayFixture` - immutable reproduction specification
+    - Links back to FeltDB evidence nodes
+    - Specifies: page URL, interactions, network mocks, expected outcome
+    - Capability flags for unsupported features
+  - `ReplayRun` - execution result with observations
+  - `OutcomeSignature` - semantic outcome matcher (not byte-for-byte)
+    - Status + error count + response fingerprint
+    - Timing envelope
+    - Causal evidence references
+  - Classification function: REPRODUCED | PARTIAL | NOT_REPRODUCED | UNDETERMINED
+  - Fingerprinting functions (responses, errors)
+
+- `replayEngine.ts` (280 lines)
+  - `ReplayEngine` class - coordinates execution
+  - Narrow scope: navigation, network mocking, clicks, inputs, wait
+  - Explicitly reports unsupported capabilities
+  - Builds detailed observation log
+  - Calculates confidence based on observation success
+  - Deterministic outcome classification
+
+- `replayContract.test.ts` (130 lines)
+  - Fingerprint consistency tests
+  - Outcome classification tests
+  - Fixture creation tests
+
+**Key Design Decisions:**
+1. **Contract-first** - Phase 5 counterfactuals mutate fixtures cleanly
+2. **Evidence-linked** - Every artifact references FeltDB nodes
+3. **Narrow scope** - Only support what we can verify (don't pretend)
+4. **Semantic matching** - Not byte-for-byte, but signature match
+5. **Unsupported tracking** - Explicitly report capabilities we can't test
+
+**Deliverables:**
+```
+✓ ReplayFixture contract (immutable)
+✓ ReplayRun result type
+✓ OutcomeSignature matching
+✓ Narrow execution path
+✓ Deterministic classification
+✓ Back-links to FeltDB evidence
+```
+
+**What this enables Phase 5:**
+```
+original fixture
+       │
+       ├── baseline → FAIL
+       │
+       ├── currency="USD" → PASS
+       │
+       ├── status=200 → FAIL
+       │
+       └── latency=500ms → FAIL
+```
+
+Since Phase 4 has clean fixture contracts, Phase 5 just:
+- Clone the fixture
+- Mutate one variable
+- Execute
+- Compare outcome
+
+---
+
+## Future Phases (Planned)
+
+### Phase 5: Counterfactual (Isolate Causal Conditions)
 - Make investigations searchable, reusable, shareable
 - Leverage FeltDB to support graph queries
 - "Find similar investigations" pattern matching
