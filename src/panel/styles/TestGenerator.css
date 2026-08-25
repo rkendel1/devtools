@@ -1,0 +1,251 @@
+.test-generator {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  margin: 1.5rem 0;
+  background: var(--bg-secondary);
+}
+
+.test-generator-header {
+  padding: 1rem;
+  background: var(--bg-primary);
+  border-bottom: 1px solid var(--border);
+}
+
+.test-generator-header h3 {
+  margin: 0 0 0.5rem 0;
+  font-size: 1rem;
+}
+
+.test-generator-header .meta {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.test-controls {
+  padding: 1rem;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.test-type-selector {
+  display: flex;
+  gap: 1.5rem;
+  flex: 1;
+  min-width: 300px;
+}
+
+.test-type-selector label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  cursor: pointer;
+  padding: 0.5rem;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.test-type-selector label:hover {
+  background: rgba(37, 99, 235, 0.05);
+}
+
+.test-type-selector input[type="radio"] {
+  cursor: pointer;
+}
+
+.test-type-selector label span:first-of-type {
+  font-weight: 600;
+}
+
+.test-type-selector .hint {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.test-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.test-actions button {
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--border);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: all 0.2s;
+}
+
+.test-actions button:hover:not(:disabled) {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
+.test-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.test-actions button.primary {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
+.test-actions button.primary:hover {
+  opacity: 0.9;
+}
+
+.test-display {
+  padding: 1rem;
+}
+
+.test-metadata {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  padding: 0.75rem;
+  background: var(--bg-primary);
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+
+.test-language,
+.test-type,
+.line-count {
+  display: inline-block;
+  padding: 0.3rem 0.6rem;
+  background: var(--accent);
+  color: white;
+  border-radius: 3px;
+  font-weight: 600;
+}
+
+.test-code {
+  margin: 1rem 0;
+  padding: 1rem;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow-x: auto;
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.test-code code {
+  background: transparent;
+  padding: 0;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+}
+
+.test-notes {
+  margin-top: 1.5rem;
+  padding: 1rem;
+  background: var(--bg-primary);
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+
+.test-notes h4 {
+  margin: 1rem 0 0.5rem 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.test-notes h4:first-child {
+  margin-top: 0;
+}
+
+.test-notes ol {
+  margin: 0.5rem 0;
+  padding-left: 1.5rem;
+}
+
+.test-notes li {
+  margin: 0.4rem 0;
+  font-size: 0.85rem;
+}
+
+.test-notes code {
+  background: var(--bg-secondary);
+  padding: 0.2rem 0.4rem;
+  border-radius: 2px;
+  font-size: 0.8rem;
+}
+
+.patterns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.pattern {
+  padding: 0.75rem;
+  background: var(--bg-secondary);
+  border-radius: 4px;
+  border-left: 2px solid var(--accent);
+}
+
+.pattern strong {
+  display: block;
+  font-size: 0.8rem;
+  margin-bottom: 0.3rem;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.pattern code {
+  display: block;
+  background: var(--bg-primary);
+  padding: 0.4rem;
+  border-radius: 2px;
+  font-size: 0.75rem;
+  overflow-x: auto;
+}
+
+.context {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  background: var(--bg-secondary);
+  border-radius: 4px;
+}
+
+.context > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.context strong {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.context code {
+  background: var(--bg-primary);
+  padding: 0.3rem 0.5rem;
+  border-radius: 2px;
+  font-size: 0.75rem;
+  overflow-x: auto;
+  word-break: break-all;
+}
+
+.context p {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-primary);
+}

@@ -6,6 +6,7 @@ import type { ExportFormat } from '../utils/export'
 import { downloadDataUrl } from '../utils/export'
 import { EvidenceGraphView } from './EvidenceGraphView'
 import { EvidenceInspector } from './EvidenceInspector'
+import { TestGenerator } from './TestGenerator'
 
 export function InvestigationDetails({ record, exportFormat, setExportFormat, copyDetails, exportDetails, reinvestigate, runAction, contextValid, aiModel, setAiModel, aiStatus, aiLoading, aiQuestion, setAiQuestion, aiAnswer, enhanceCurrent, askCurrent }: {
   record: InvestigationRecord; exportFormat: ExportFormat; setExportFormat: (format: ExportFormat) => void
@@ -34,6 +35,8 @@ export function InvestigationDetails({ record, exportFormat, setExportFormat, co
     </div>
 
     {showEvidenceInspector && <EvidenceInspectorWrapper investigationId={record.id} />}
+
+    <TestGenerator record={record} />
 
     <h3>Trace and source lines</h3><div className="trace">{graph.trace.map((step, index) => <div className="trace-item" key={`${step.label}:${index}`}><div><span className="step-number">{index + 1}</span>{step.label}</div>{step.source && <button className="source-link" onClick={() => openSourceLocation(step.source!, step.line)}>{step.source}{step.line ? `:${step.line}` : ''}</button>}</div>)}</div>
 
