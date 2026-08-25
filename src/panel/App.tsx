@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { captureConsoleEvents, captureRequests, hasChromeDevtools, primeConsoleCapture } from '../lib/chrome'
 import { buildEvidenceGraph } from '../lib/evidenceEngine'
 import { reasonFromEvidence } from '../lib/reasoner'
+import { formatInvestigationReport } from '../lib/report'
 import { appendHistory, loadHistory } from '../lib/store'
 import type { InvestigationRecord, NetworkRequestSnapshot } from '../lib/types'
 
@@ -112,6 +113,29 @@ export default function App() {
     setMessage(`Trace has ${investigation.graph.trace.length} step(s).`)
   }
 
+  async function copyDetails() {
+    if (!investigation) {
+      setMessage('Run an investigation first.')
+      return
+    }
+
+    const report = formatInvestigationReport(investigation)
+    try {
+      await navigator.clipboard.writeText(report)
+      setMessage('Investigation details copied to clipboard.')
+    } catch {
+      const textarea = document.createElement('textarea')
+      textarea.value = report
+      textarea.style.position = 'fixed'
+      textarea.style.opacity = '0'
+      document.body.appendChild(textarea)
+      textarea.select()
+      const copied = document.execCommand('copy')
+      textarea.remove()
+      setMessage(copied ? 'Investigation details copied to clipboard.' : 'Could not copy details.')
+    }
+  }
+
   return (
     <div className="app">
       <div className="card">
@@ -190,6 +214,7 @@ export default function App() {
             </div>
 
             <div className="actions">
+              <button className="primary" onClick={copyDetails}>Copy details</button>
               <button onClick={compareView}>Compare successful request</button>
               <button onClick={openSource}>Show source</button>
               <button onClick={traceView}>Trace request</button>

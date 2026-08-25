@@ -10,6 +10,7 @@ Chrome Runtime Investigator is a Chrome DevTools extension that turns raw browse
 - Local-first reasoning layer that returns diagnosis, confidence, and actions.
 - Sensitive data redaction before model-facing analysis.
 - Local investigation history persistence.
+- Copyable plain-text reports with request details, evidence, and source line references.
 - Rust WASM evidence engine crate scaffold (`/wasm-engine`) for deterministic normalization.
 
 ## Development
