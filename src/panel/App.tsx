@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   captureConsoleEvents, captureEnvironment, captureRequests, captureScreenshot, endpointKey,
-  hasChromeDevtools, openSourceLocation, subscribeToRequests,
+  hasChromeDevtools, openSourceLocation, pingExtensionContext, subscribeToRequests,
 } from '../lib/chrome'
 import { buildEvidenceGraph } from '../lib/evidenceEngine'
 import { reasonFromEvidence } from '../lib/reasoner'
@@ -84,6 +84,7 @@ export default function App() {
   const [message, setMessage] = useState('Live capture ready')
   const [storageStatus, setStorageStatus] = useState(() => durableRuntime()?.storage ?? 'local fallback')
   const [lastCleanup, setLastCleanup] = useState<number | null>(null)
+  const [contextValid, setContextValid] = useState(true)
   const [aiModel, setAiModel] = useState<string>(LOCAL_MODELS.smallest)
   const [aiStatus, setAiStatus] = useState('Local AI idle')
   const [aiLoading, setAiLoading] = useState(false)
@@ -111,6 +112,13 @@ export default function App() {
       })
     }).catch((error) => setMessage(`FeltDB unavailable; using local fallback: ${String(error)}`))
     return () => { cancelled = true; unsubscribe() }
+  }, [])
+
+  useEffect(() => {
+    const check = () => void pingExtensionContext().then(setContextValid)
+    check()
+    const timer = window.setInterval(check, 10_000)
+    return () => window.clearInterval(timer)
   }, [])
 
   useEffect(() => {
@@ -243,15 +251,20 @@ export default function App() {
     setHistory(next)
   }
 
-  async function copyDetails(): Promise<void> {
-    if (!investigation) return
-    setMessage(await writeClipboard(reportFor(investigation, exportFormat)) ? `Copied ${exportFormat} report.` : 'Could not copy report.')
+  async function copyDetails(): Promise<string> {
+    if (!investigation) return 'No investigation is selected.'
+    const result = await writeClipboard(reportFor(investigation, exportFormat)) ? `Copied ${exportFormat} report.` : 'Could not copy report.'
+    setMessage(result)
+    return result
   }
 
-  function exportDetails(): void {
-    if (!investigation) return
+  function exportDetails(): string {
+    if (!investigation) return 'No investigation is selected.'
     const extension = exportFormat === 'json' ? 'json' : exportFormat === 'markdown' ? 'md' : 'txt'
     download(`runtime-investigation-${investigation.id}.${extension}`, reportFor(investigation, exportFormat), exportFormat === 'json' ? 'application/json' : 'text/plain')
+    const result = `Downloaded ${exportFormat} report.`
+    setMessage(result)
+    return result
   }
 
   function updatePrivacy(next: PrivacySettings): void {
@@ -271,7 +284,9 @@ export default function App() {
       mutateHistory((records) => records.map((record) => record.id === updated.id ? updated : record))
       setAiStatus(`Local diagnosis complete · provenance ${enhanced.findingId}`)
     } catch (error) {
-      setAiStatus(`Local AI failed: ${String(error)}`)
+      const text = String(error)
+      if (text.includes('Close and reopen DevTools')) setContextValid(false)
+      setAiStatus(`Local AI failed: ${text}`)
     } finally {
       setAiLoading(false)
     }
@@ -286,7 +301,9 @@ export default function App() {
       setAiAnswer(await askLocalInvestigator(investigation, aiQuestion.trim(), aiModel))
       setAiStatus('Answer complete and provenance saved.')
     } catch (error) {
-      setAiStatus(`Local AI failed: ${String(error)}`)
+      const text = String(error)
+      if (text.includes('Close and reopen DevTools')) setContextValid(false)
+      setAiStatus(`Local AI failed: ${text}`)
     } finally {
       setAiLoading(false)
     }
@@ -304,6 +321,7 @@ export default function App() {
         </header>
 
         {!hasChromeDevtools() && <p className="badge warn">Open this page inside the Chrome DevTools Investigate panel.</p>}
+        {!contextValid && <div className="context-invalid"><strong>Extension was reloaded.</strong> This DevTools panel is stale, so its buttons cannot contact the extension. Close DevTools completely and reopen it.</div>}
 
         {showPrivacy && <section className="settings">
           <h3>Privacy and bundle settings</h3>
@@ -335,8 +353,19 @@ export default function App() {
 
         {investigation ? <InvestigationDetails record={investigation} exportFormat={exportFormat} setExportFormat={setExportFormat} copyDetails={copyDetails} exportDetails={exportDetails} reinvestigate={() => {
           const request = requestsRef.current.find((item) => item.id === investigation.requestId)
-          if (request) void investigateRequest(request)
-        }} aiModel={aiModel} setAiModel={setAiModel} aiStatus={aiStatus} aiLoading={aiLoading} aiQuestion={aiQuestion} setAiQuestion={setAiQuestion} aiAnswer={aiAnswer} enhanceCurrent={enhanceCurrent} askCurrent={askCurrent} /> : <p className="empty">Waiting for a failed request or runtime error. You can also select any request manually.</p>}
+          if (!request) return 'The original request has expired from live memory. Select a current request above to investigate it again.'
+          void investigateRequest(request)
+          return 'Investigation started with current browser evidence.'
+        }} runAction={(action) => {
+          if (action === 'compare') return investigation.graph.comparison?.semanticDiff?.length ? investigation.graph.comparison.semanticDiff.join('\n') : 'No comparable successful request was captured for this endpoint.'
+          if (action === 'source') {
+            const source = investigation.graph.initiator?.source
+            if (!source) return 'No source location was captured for this request.'
+            openSourceLocation(source, investigation.graph.initiator?.line)
+            return `Opened ${source}${investigation.graph.initiator?.line ? `:${investigation.graph.initiator.line}` : ''} in Sources.`
+          }
+          return investigation.graph.trace.length ? investigation.graph.trace.map((step, index) => `${index + 1}. ${step.label}${step.source ? ` — ${step.source}:${step.line ?? 1}` : ''}`).join('\n') : 'No trace steps were captured.'
+        }} contextValid={contextValid} aiModel={aiModel} setAiModel={setAiModel} aiStatus={aiStatus} aiLoading={aiLoading} aiQuestion={aiQuestion} setAiQuestion={setAiQuestion} aiAnswer={aiAnswer} enhanceCurrent={enhanceCurrent} askCurrent={askCurrent} /> : <p className="empty">Waiting for a failed request or runtime error. You can also select any request manually.</p>}
       </main>
 
       <aside className="card history">
@@ -359,14 +388,16 @@ export default function App() {
   )
 }
 
-function InvestigationDetails({ record, exportFormat, setExportFormat, copyDetails, exportDetails, reinvestigate, aiModel, setAiModel, aiStatus, aiLoading, aiQuestion, setAiQuestion, aiAnswer, enhanceCurrent, askCurrent }: {
+function InvestigationDetails({ record, exportFormat, setExportFormat, copyDetails, exportDetails, reinvestigate, runAction, contextValid, aiModel, setAiModel, aiStatus, aiLoading, aiQuestion, setAiQuestion, aiAnswer, enhanceCurrent, askCurrent }: {
   record: InvestigationRecord; exportFormat: ExportFormat; setExportFormat: (format: ExportFormat) => void
-  copyDetails: () => void; exportDetails: () => void; reinvestigate: () => void
+  copyDetails: () => Promise<string>; exportDetails: () => string; reinvestigate: () => string
+  runAction: (action: 'compare' | 'source' | 'trace') => string; contextValid: boolean
   aiModel: string; setAiModel: (model: string) => void; aiStatus: string; aiLoading: boolean
   aiQuestion: string; setAiQuestion: (question: string) => void; aiAnswer: string
   enhanceCurrent: () => void; askCurrent: () => void
 }) {
   const { graph, result } = record
+  const [actionResult, setActionResult] = useState('')
   return <section className="result">
     <div className="result-heading"><div><h2>⚠ Likely cause</h2><p>{result.diagnosis}</p></div><div className="confidence">{Math.round(result.confidence * 100)}%<span>confidence</span></div></div>
     <div className="badges"><span className="badge">{graph.request.status} {graph.request.method}</span>{graph.redactionApplied && <span className="badge">Sensitive data redacted</span>}<span className="badge">{record.occurrenceCount ?? 1} occurrence(s)</span></div>
@@ -389,15 +420,17 @@ function InvestigationDetails({ record, exportFormat, setExportFormat, copyDetai
       <Bundle title="Reproduction steps" value={graph.bundle.reproductionSteps} />
     </div>{graph.bundle.screenshot && <><img className="screenshot" src={graph.bundle.screenshot} alt="Captured inspected page" /><button onClick={() => downloadDataUrl(`runtime-investigation-${record.id}.png`, graph.bundle!.screenshot!)}>Save screenshot</button></>}</details>}
 
-    <h3>Next actions</h3><ul className="list">{result.nextActions.map((item) => <li key={item}>{item}</li>)}</ul>
+    <h3>Investigation actions</h3><div className="actions"><button onClick={() => setActionResult(runAction('compare'))}>Compare successful request</button><button onClick={() => setActionResult(runAction('source'))}>Show source</button><button onClick={() => setActionResult(runAction('trace'))}>Trace request</button><button onClick={() => setActionResult(reinvestigate())}>Investigate again</button></div>
+    {actionResult && <pre className="action-result">{actionResult}</pre>}
+    {!!result.nextActions.length && <><h3>Recommended follow-ups</h3><ul className="list">{result.nextActions.map((item) => <li key={item}>{item}</li>)}</ul></>}
     <section className="local-ai">
       <div className="local-ai-heading"><div><h3>Private local investigator</h3><p className="meta">WebLLM receives only a bounded redacted graph. The first run downloads the selected model.</p></div><select value={aiModel} onChange={(event) => setAiModel(event.target.value)} disabled={aiLoading}><option value={LOCAL_MODELS.smallest}>SmolLM2 360M · ~580 MB VRAM</option><option value={LOCAL_MODELS.balanced}>SmolLM2 1.7B · stronger</option></select></div>
-      {!isLocalAiAvailable() ? <p className="badge warn">WebGPU is unavailable. Deterministic diagnosis remains active.</p> : <div className="actions"><button className="primary" onClick={enhanceCurrent} disabled={aiLoading}>Enhance diagnosis locally</button>{aiLoading && <button onClick={interruptLocalAi}>Stop</button>}</div>}
+      {!isLocalAiAvailable() ? <p className="badge warn">WebGPU is unavailable. Deterministic diagnosis remains active.</p> : <div className="actions"><button className="primary" onClick={enhanceCurrent} disabled={aiLoading || !contextValid}>Enhance diagnosis locally</button>{aiLoading && <button onClick={interruptLocalAi}>Stop</button>}</div>}
       <p className="status">{aiStatus}</p>
-      <div className="ask-row"><input value={aiQuestion} onChange={(event) => setAiQuestion(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') askCurrent() }} placeholder="Ask about this evidence graph" disabled={aiLoading || !isLocalAiAvailable()} /><button onClick={askCurrent} disabled={aiLoading || !aiQuestion.trim() || !isLocalAiAvailable()}>Ask</button></div>
+      <div className="ask-row"><input value={aiQuestion} onChange={(event) => setAiQuestion(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') askCurrent() }} placeholder="Ask about this evidence graph" disabled={aiLoading || !isLocalAiAvailable() || !contextValid} /><button onClick={askCurrent} disabled={aiLoading || !aiQuestion.trim() || !isLocalAiAvailable() || !contextValid}>Ask</button></div>
       {aiAnswer && <pre className="ai-answer">{aiAnswer}</pre>}
     </section>
-    <div className="actions"><select value={exportFormat} onChange={(event) => setExportFormat(event.target.value as ExportFormat)}><option value="text">Plain text</option><option value="markdown">Markdown / GitHub</option><option value="jira">Jira</option><option value="json">JSON</option></select><button className="primary" onClick={copyDetails}>Copy all details</button><button onClick={exportDetails}>Download report</button><button onClick={reinvestigate}>Investigate again</button></div>
+    <div className="actions"><select value={exportFormat} onChange={(event) => setExportFormat(event.target.value as ExportFormat)}><option value="text">Plain text</option><option value="markdown">Markdown / GitHub</option><option value="jira">Jira</option><option value="json">JSON</option></select><button className="primary" onClick={() => void copyDetails().then(setActionResult)}>Copy all details</button><button onClick={() => setActionResult(exportDetails())}>Download report</button></div>
   </section>
 }
 

@@ -82,10 +82,17 @@ export async function captureConsoleEvents(limit = 50): Promise<ConsoleEvent[]> 
     return []
   }
 
-  return new Promise((resolve) => chrome.runtime.sendMessage(
-    { type: 'runtime-investigator:get-events', tabId: chrome.devtools.inspectedWindow.tabId },
-    (response) => resolve((response?.events ?? []).slice(-limit)),
-  ))
+  return new Promise((resolve) => {
+    try {
+      if (!chrome.runtime?.id) return resolve([])
+      chrome.runtime.sendMessage(
+        { type: 'runtime-investigator:get-events', tabId: chrome.devtools.inspectedWindow.tabId },
+        (response) => resolve(chrome.runtime.lastError ? [] : (response?.events ?? []).slice(-limit)),
+      )
+    } catch {
+      resolve([])
+    }
+  })
 }
 
 export function primeConsoleCapture(): void {
@@ -126,4 +133,17 @@ export function endpointKey(request: Pick<NetworkRequestSnapshot, 'method' | 'ur
   } catch {
     return `${request.method} ${request.url.replace(/\/\d+(?=\/|$)/g, '/:id')}`
   }
+}
+
+export function pingExtensionContext(): Promise<boolean> {
+  return new Promise((resolve) => {
+    try {
+      if (!chrome.runtime?.id) return resolve(false)
+      chrome.runtime.sendMessage({ type: 'runtime-investigator:health' }, (response) => {
+        resolve(!chrome.runtime.lastError && response?.ok === true)
+      })
+    } catch {
+      resolve(false)
+    }
+  })
 }

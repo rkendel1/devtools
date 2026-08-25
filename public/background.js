@@ -14,6 +14,10 @@ async function ensureOffscreen() {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === 'runtime-investigator:health') {
+    sendResponse({ ok: true })
+    return false
+  }
   if (message?.type === 'runtime-investigator:ai-generate' && message.target !== 'offscreen') {
     void ensureOffscreen().then(() => chrome.runtime.sendMessage({ ...message, target: 'offscreen' }, sendResponse)).catch(
       (error) => sendResponse({ ok: false, error: String(error) }),

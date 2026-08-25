@@ -97,6 +97,21 @@ input {
   font-size: 12px;
 }
 
+.context-invalid {
+  margin: 12px 0;
+  padding: 11px;
+  border: 1px solid #f97316;
+  border-radius: 8px;
+  background: #431407;
+  color: #fed7aa;
+}
+
+.action-result {
+  max-height: 220px;
+  border: 1px solid #2563eb;
+  color: #bfdbfe;
+}
+
 .empty {
   padding: 32px;
   text-align: center;

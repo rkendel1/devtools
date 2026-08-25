@@ -60,11 +60,10 @@ class FeltRepository {
       this.sessions = this.db.collection<CaptureSession>('sessions')
       this.requests = this.db.collection<CapturedRequestRecord>('requests')
       this.runtimeEvents = this.db.collection<CapturedRuntimeRecord>('runtime_events')
-      this.histories.createIndex({ name: 'fingerprint', type: 'hash', field: 'fingerprint' })
-      this.nodes.createIndex({ name: 'investigation', type: 'hash', field: 'investigationId' })
-      this.edges.createIndex({ name: 'investigation', type: 'hash', field: 'investigationId' })
-      this.requests.createIndex({ name: 'session', type: 'hash', field: 'sessionId' })
-      this.runtimeEvents.createIndex({ name: 'session', type: 'hash', field: 'sessionId' })
+      // FeltDB restores persisted index definitions asynchronously in Collection's
+      // constructor. Creating the same indexes here races that restore. Our bounded
+      // collections make the current exact-match scans inexpensive, so initialization
+      // intentionally leaves index ownership entirely to FeltDB.
     }
     return this.db
   }

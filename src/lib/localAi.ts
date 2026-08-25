@@ -17,10 +17,20 @@ export interface LocalDiagnosis {
 interface GenerateResponse { ok: boolean; text?: string; model?: string; error?: string }
 
 function generate(model: string, messages: Array<{ role: 'system' | 'user'; content: string }>, json = false): Promise<GenerateResponse> {
-  return new Promise((resolve) => chrome.runtime.sendMessage({
-    type: 'runtime-investigator:ai-generate', model, messages,
-    options: { temperature: 0.1, maxTokens: 700, responseFormat: json ? { type: 'json_object', schema: DIAGNOSIS_SCHEMA } : undefined },
-  }, resolve))
+  return new Promise((resolve) => {
+    try {
+      if (!chrome.runtime?.id) return resolve({ ok: false, error: staleContextMessage() })
+      chrome.runtime.sendMessage({
+        type: 'runtime-investigator:ai-generate', model, messages,
+        options: { temperature: 0.1, maxTokens: 700, responseFormat: json ? { type: 'json_object', schema: DIAGNOSIS_SCHEMA } : undefined },
+      }, (response: GenerateResponse | undefined) => {
+        if (chrome.runtime.lastError) resolve({ ok: false, error: normalizeRuntimeError(chrome.runtime.lastError.message) })
+        else resolve(response ?? { ok: false, error: 'Local AI did not return a response.' })
+      })
+    } catch (error) {
+      resolve({ ok: false, error: normalizeRuntimeError(String(error)) })
+    }
+  })
 }
 
 const DIAGNOSIS_SCHEMA = {
@@ -97,5 +107,13 @@ export function isLocalAiAvailable(): boolean {
 }
 
 export function interruptLocalAi(): void {
-  chrome.runtime.sendMessage({ type: 'runtime-investigator:ai-interrupt' })
+  try { chrome.runtime.sendMessage({ type: 'runtime-investigator:ai-interrupt' }) } catch { /* stale panel */ }
+}
+
+function staleContextMessage(): string {
+  return 'The extension was reloaded. Close and reopen DevTools before using local AI.'
+}
+
+function normalizeRuntimeError(message: string | undefined): string {
+  return message?.toLowerCase().includes('context invalidated') ? staleContextMessage() : (message ?? 'Extension messaging failed.')
 }
