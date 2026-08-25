@@ -8,6 +8,9 @@ import { EvidenceGraphView } from './EvidenceGraphView'
 import { EvidenceInspector } from './EvidenceInspector'
 import { TestGenerator } from './TestGenerator'
 import { VerificationPanel } from './VerificationPanel'
+import { useReplay } from '../../hooks/useReplay'
+import { ReplayPanel } from '../../components/ReplayPanel'
+import { createReplayEvidenceNodes } from '../../lib/replayFeltDB'
 
 export function InvestigationDetails({ record, exportFormat, setExportFormat, copyDetails, exportDetails, reinvestigate, runAction, contextValid, aiModel, setAiModel, aiStatus, aiLoading, aiQuestion, setAiQuestion, aiAnswer, enhanceCurrent, askCurrent }: {
   record: InvestigationRecord; exportFormat: ExportFormat; setExportFormat: (format: ExportFormat) => void
@@ -21,6 +24,50 @@ export function InvestigationDetails({ record, exportFormat, setExportFormat, co
   const [actionResult, setActionResult] = useState('')
   const [showEvidenceInspector, setShowEvidenceInspector] = useState(false)
   const [comparisonInvestigation, setComparisonInvestigation] = useState<InvestigationRecord | null>(null)
+  const replay = useReplay()
+  const [showReplayButton, setShowReplayButton] = useState(true)
+
+  const handleReplay = async () => {
+    setShowReplayButton(false)
+
+    const interactions = graph.bundle?.reproductionSteps?.map((step) => ({
+      type: 'interaction',
+      description: step,
+      selector: '#checkout-btn',
+    })) || []
+
+    const fixture = replay.createFixture(
+      record.id,
+      graph.request.url.split('/').pop() || 'unknown',
+      graph.request.url,
+      graph.request.method,
+      graph.bundle?.environment?.pageUrl || 'http://localhost',
+      interactions,
+      []
+    )
+
+    const originalOutcome = {
+      targetRequest: {
+        method: graph.request.method,
+        url: graph.request.url,
+      },
+      status: graph.request.status,
+      statusText: graph.response.statusText,
+      responseFingerprint: record.fingerprint || 'fp:unknown',
+      errorFingerprints: graph.bundle?.runtimeEvents?.map((e) => `err:${e.message}`) || [],
+      errorCount: graph.bundle?.runtimeEvents?.filter((e) => e.type === 'runtime.error').length || 0,
+      relevantRuntimeEvents: graph.bundle?.runtimeEvents || [],
+      timing: { requestDuration: 0, totalTime: 0 },
+      causalEvidence: [record.id],
+    }
+
+    const run = await replay.executeReplay(fixture, originalOutcome)
+
+    if (run) {
+      await ReplayResultWrapper({ run, investigationId: record.id })
+    }
+  }
+
   return <section className="result">
     <div className="result-heading"><div><h2>⚠ Likely cause</h2><p>{result.diagnosis}</p></div><div className="confidence">{Math.round(result.confidence * 100)}%<span>confidence</span></div></div>
     <div className="badges"><span className="badge">{graph.request.status} {graph.request.method}</span>{graph.redactionApplied && <span className="badge">Sensitive data redacted</span>}<span className="badge">{record.occurrenceCount ?? 1} occurrence(s)</span></div>
@@ -31,10 +78,34 @@ export function InvestigationDetails({ record, exportFormat, setExportFormat, co
     {!!graph.comparison?.semanticDiff?.length && <><h3>Compared with successful request</h3><ul className="list">{graph.comparison.semanticDiff.map((item) => <li key={item}>{item}</li>)}</ul></>}
     <h3>Causal Analysis</h3>
     <div className="actions">
+      {showReplayButton && (
+        <button
+          onClick={handleReplay}
+          className="primary"
+          disabled={replay.loading}
+        >
+          {replay.loading ? '⏳ Replaying...' : '▶ Replay'}
+        </button>
+      )}
       <button onClick={() => setShowEvidenceInspector(!showEvidenceInspector)} className="primary">
         {showEvidenceInspector ? '▼' : '▶'} Why did this fail? (Interactive)
       </button>
     </div>
+
+    {replay.run && (
+      <ReplayPanel
+        run={replay.run}
+        onInspectEvidence={() => {
+          setShowEvidenceInspector(true)
+        }}
+      />
+    )}
+
+    {replay.error && (
+      <div className="action-result" style={{ color: '#ef4444', fontWeight: 'bold' }}>
+        Replay error: {replay.error}
+      </div>
+    )}
 
     {showEvidenceInspector && <EvidenceInspectorWrapper investigationId={record.id} />}
 
@@ -105,4 +176,17 @@ function EvidenceInspectorWrapper({ investigationId }: { investigationId: string
 
   if (!neighborhood) return <p className="meta">Loading evidence chain...</p>
   return <EvidenceInspector neighborhood={neighborhood as any} />
+}
+
+async function ReplayResultWrapper({ run, investigationId }: { run: any; investigationId: string }) {
+  const { feltRepository } = await import('../../lib/feltRepository')
+  const { nodes, edges } = createReplayEvidenceNodes(run)
+
+  for (const node of nodes) {
+    feltRepository.addNode(node)
+  }
+
+  for (const edge of edges) {
+    feltRepository.addEdge(edge)
+  }
 }
