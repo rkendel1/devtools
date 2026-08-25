@@ -7,6 +7,7 @@ import { downloadDataUrl } from '../utils/export'
 import { EvidenceGraphView } from './EvidenceGraphView'
 import { EvidenceInspector } from './EvidenceInspector'
 import { TestGenerator } from './TestGenerator'
+import { VerificationPanel } from './VerificationPanel'
 
 export function InvestigationDetails({ record, exportFormat, setExportFormat, copyDetails, exportDetails, reinvestigate, runAction, contextValid, aiModel, setAiModel, aiStatus, aiLoading, aiQuestion, setAiQuestion, aiAnswer, enhanceCurrent, askCurrent }: {
   record: InvestigationRecord; exportFormat: ExportFormat; setExportFormat: (format: ExportFormat) => void
@@ -19,6 +20,7 @@ export function InvestigationDetails({ record, exportFormat, setExportFormat, co
   const { graph, result } = record
   const [actionResult, setActionResult] = useState('')
   const [showEvidenceInspector, setShowEvidenceInspector] = useState(false)
+  const [comparisonInvestigation, setComparisonInvestigation] = useState<InvestigationRecord | null>(null)
   return <section className="result">
     <div className="result-heading"><div><h2>⚠ Likely cause</h2><p>{result.diagnosis}</p></div><div className="confidence">{Math.round(result.confidence * 100)}%<span>confidence</span></div></div>
     <div className="badges"><span className="badge">{graph.request.status} {graph.request.method}</span>{graph.redactionApplied && <span className="badge">Sensitive data redacted</span>}<span className="badge">{record.occurrenceCount ?? 1} occurrence(s)</span></div>
@@ -37,6 +39,14 @@ export function InvestigationDetails({ record, exportFormat, setExportFormat, co
     {showEvidenceInspector && <EvidenceInspectorWrapper investigationId={record.id} />}
 
     <TestGenerator record={record} />
+
+    {comparisonInvestigation && <VerificationPanel before={comparisonInvestigation} after={record} />}
+
+    <div className="actions">
+      <button onClick={() => setComparisonInvestigation(comparisonInvestigation ? null : record)}>
+        {comparisonInvestigation ? '✓' : 'Set as'} Before for Verification
+      </button>
+    </div>
 
     <h3>Trace and source lines</h3><div className="trace">{graph.trace.map((step, index) => <div className="trace-item" key={`${step.label}:${index}`}><div><span className="step-number">{index + 1}</span>{step.label}</div>{step.source && <button className="source-link" onClick={() => openSourceLocation(step.source!, step.line)}>{step.source}{step.line ? `:${step.line}` : ''}</button>}</div>)}</div>
 
