@@ -1,71 +1,27 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  captureConsoleEvents, captureEnvironment, captureRequests, captureScreenshot, endpointKey,
+  captureConsoleEvents, captureEnvironment, captureRequests, endpointKey,
   hasChromeDevtools, openSourceLocation, pingExtensionContext, subscribeToRequests,
 } from '../lib/chrome'
 import { buildEvidenceGraph } from '../lib/evidenceEngine'
 import { reasonFromEvidence } from '../lib/reasoner'
 import { redactText } from '../lib/redaction'
-import { formatInvestigationReport, formatJiraReport, formatJsonReport, formatMarkdownReport } from '../lib/report'
+import { formatJsonReport } from '../lib/report'
 import { durableRuntime, initializeDurableStore, loadHistory, loadPrivacy, savePrivacy, subscribeDurableHistory, updateHistory } from '../lib/store'
-import { askLocalInvestigator, enhanceWithLocalAi, interruptLocalAi, isLocalAiAvailable, LOCAL_MODELS } from '../lib/localAi'
+import { askLocalInvestigator, enhanceWithLocalAi, LOCAL_MODELS } from '../lib/localAi'
 import { feltRepository } from '../lib/feltRepository'
-import type { EvidenceNeighborhood } from '../lib/evidenceGraph'
-import { MAINTENANCE_INTERVAL_MS, MAX_LIVE_REQUESTS, RETENTION_MS } from '../lib/retention'
+import { MAX_LIVE_REQUESTS } from '../lib/retention'
 import type { InvestigationRecord, NetworkRequestSnapshot, PrivacySettings } from '../lib/types'
+import { download, formatRequest, reportFor, writeClipboard } from './utils/export'
+import { useMaintenance } from './hooks/useMaintenance'
+import { useScreenshots } from './hooks/useScreenshots'
+import { ScreenshotGallery } from './components/ScreenshotGallery'
+import { InvestigationDetails } from './components/InvestigationDetails'
 
 type ExportFormat = 'text' | 'markdown' | 'jira' | 'json'
 type Filters = { query: string; status: string; domain: string; type: string; timeframe: string }
-type ScreenshotFrame = { id: string; dataUrl: string; capturedAt: number; label: string }
 
 const EMPTY_FILTERS: Filters = { query: '', status: 'all', domain: 'all', type: 'all', timeframe: 'all' }
-const MAX_SCREENSHOTS = 12
-const SCREENSHOT_INTERVAL_MS = 3000
-
-function formatRequest(request: NetworkRequestSnapshot): string {
-  const url = request.url.length > 90 ? `${request.url.slice(0, 90)}…` : request.url
-  return `${request.status} ${request.method} ${url}`
-}
-
-function reportFor(record: InvestigationRecord, format: ExportFormat): string {
-  if (format === 'json') return formatJsonReport(record)
-  if (format === 'markdown') return formatMarkdownReport(record)
-  if (format === 'jira') return formatJiraReport(record)
-  return formatInvestigationReport(record)
-}
-
-async function writeClipboard(value: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(value)
-    return true
-  } catch {
-    const textarea = document.createElement('textarea')
-    textarea.value = value
-    textarea.style.position = 'fixed'
-    textarea.style.opacity = '0'
-    document.body.appendChild(textarea)
-    textarea.select()
-    const copied = document.execCommand('copy')
-    textarea.remove()
-    return copied
-  }
-}
-
-function download(name: string, contents: string, type = 'text/plain'): void {
-  const href = URL.createObjectURL(new Blob([contents], { type }))
-  const anchor = document.createElement('a')
-  anchor.href = href
-  anchor.download = name
-  anchor.click()
-  URL.revokeObjectURL(href)
-}
-
-function downloadDataUrl(name: string, href: string): void {
-  const anchor = document.createElement('a')
-  anchor.href = href
-  anchor.download = name
-  anchor.click()
-}
 
 export default function App() {
   const [requests, setRequests] = useState<NetworkRequestSnapshot[]>([])
@@ -80,10 +36,6 @@ export default function App() {
   const [historyQuery, setHistoryQuery] = useState('')
   const [exportFormat, setExportFormat] = useState<ExportFormat>('text')
   const [autoInvestigate, setAutoInvestigate] = useState(true)
-  const [screenshots, setScreenshots] = useState<ScreenshotFrame[]>([])
-  const screenshotsRef = useRef<ScreenshotFrame[]>([])
-  const [recordingScreens, setRecordingScreens] = useState(false)
-  const screenshotBusy = useRef(false)
   const [showPrivacy, setShowPrivacy] = useState(false)
   const [redactionPreview, setRedactionPreview] = useState('')
   const [loading, setLoading] = useState(false)
@@ -98,10 +50,11 @@ export default function App() {
   const [aiAnswer, setAiAnswer] = useState('')
   const lastRuntimeEvent = useRef(0)
 
+  const { screenshots, setScreenshots, recordingScreens, setRecordingScreens, captureFrame, copyScreenshot } = useScreenshots(setMessage)
+
   useEffect(() => { requestsRef.current = requests }, [requests])
   useEffect(() => { historyRef.current = history }, [history])
   useEffect(() => { privacyRef.current = privacy }, [privacy])
-  useEffect(() => { screenshotsRef.current = screenshots }, [screenshots])
 
   useEffect(() => {
     let cancelled = false
@@ -128,20 +81,7 @@ export default function App() {
     return () => window.clearInterval(timer)
   }, [])
 
-  useEffect(() => {
-    const maintain = () => void feltRepository.runMaintenance(true).then((result) => {
-      const cutoff = Date.now() - RETENTION_MS
-      const retained = requestsRef.current.filter((request) => request.startedAt >= cutoff).slice(-MAX_LIVE_REQUESTS)
-      if (retained.length !== requestsRef.current.length) {
-        requestsRef.current = retained
-        setRequests(retained)
-        setSelectedRequestId((current) => retained.some((request) => request.id === current) ? current : '')
-      }
-      if (Object.values(result).some((count) => count > 0)) setLastCleanup(Date.now())
-    }).catch((error) => setMessage(`Retention maintenance failed: ${String(error)}`))
-    const timer = window.setInterval(maintain, MAINTENANCE_INTERVAL_MS)
-    return () => window.clearInterval(timer)
-  }, [])
+  useMaintenance(requestsRef, setRequests, setSelectedRequestId, setLastCleanup, setMessage)
 
   useEffect(() => {
     const listener = (progress: { type?: string; target?: string; progress?: number; text?: string }) => {
@@ -230,41 +170,6 @@ export default function App() {
   }, [autoInvestigate])
 
   useEffect(() => {
-    if (!recordingScreens) return
-    const take = async () => {
-      if (screenshotBusy.current) return
-      if (screenshotsRef.current.length >= MAX_SCREENSHOTS) {
-        setRecordingScreens(false)
-        setMessage(`Screenshot sequence stopped at the ${MAX_SCREENSHOTS}-frame memory cap.`)
-        return
-      }
-      screenshotBusy.current = true
-      try {
-        const dataUrl = await captureScreenshot()
-        if (!dataUrl) {
-          setRecordingScreens(false)
-          setMessage('Screen capture was not permitted for the inspected tab.')
-          return
-        }
-        const next = [...screenshotsRef.current, {
-          id: crypto.randomUUID(), dataUrl, capturedAt: Date.now(), label: 'Sequence capture',
-        }].slice(-MAX_SCREENSHOTS)
-        screenshotsRef.current = next
-        setScreenshots(next)
-        if (next.length >= MAX_SCREENSHOTS) {
-          setRecordingScreens(false)
-          setMessage(`Screenshot sequence complete at the ${MAX_SCREENSHOTS}-frame memory cap.`)
-        }
-      } finally {
-        screenshotBusy.current = false
-      }
-    }
-    void take()
-    const timer = window.setInterval(() => void take(), SCREENSHOT_INTERVAL_MS)
-    return () => window.clearInterval(timer)
-  }, [recordingScreens])
-
-  useEffect(() => {
     const timer = window.setInterval(() => void captureConsoleEvents(500).then((events) => {
       const newest = events.at(-1)
       if (!newest || newest.ts <= lastRuntimeEvent.current) return
@@ -311,37 +216,6 @@ export default function App() {
     setPrivacy(next)
     privacyRef.current = next
     savePrivacy(next)
-  }
-
-  async function captureFrame(): Promise<void> {
-    if (screenshotBusy.current) return
-    screenshotBusy.current = true
-    try {
-      const dataUrl = await captureScreenshot()
-      if (!dataUrl) {
-        setMessage('Screen capture was not permitted for the inspected tab.')
-        return
-      }
-      const next = [...screenshotsRef.current, {
-        id: crypto.randomUUID(), dataUrl, capturedAt: Date.now(), label: 'Manual capture',
-      }].slice(-MAX_SCREENSHOTS)
-      screenshotsRef.current = next
-      setScreenshots(next)
-      setMessage('Screenshot captured in memory.')
-    } finally {
-      screenshotBusy.current = false
-    }
-  }
-
-  async function copyScreenshot(frame: ScreenshotFrame): Promise<void> {
-    try {
-      const blob = await fetch(frame.dataUrl).then((response) => response.blob())
-      if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') throw new Error('Image clipboard is unavailable.')
-      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
-      setMessage('Screenshot copied as an image. Paste it into any image-capable app.')
-    } catch (error) {
-      setMessage(`Could not copy screenshot: ${String(error)}`)
-    }
   }
 
   async function enhanceCurrent(): Promise<void> {
@@ -466,103 +340,4 @@ export default function App() {
       </aside>
     </div>
   )
-}
-
-function ScreenshotGallery({ frames, recording, capture, toggleRecording, copy, remove, clear }: {
-  frames: ScreenshotFrame[]; recording: boolean; capture: () => void; toggleRecording: () => void
-  copy: (frame: ScreenshotFrame) => void; remove: (id: string) => void; clear: () => void
-}) {
-  const latest = frames.at(-1)
-  return <section className="screenshot-panel">
-    <div className="screenshot-toolbar">
-      <div><h3>Screenshots <span className="count">{frames.length}/{MAX_SCREENSHOTS}</span></h3><p className="meta">Memory only · sequence captures every {SCREENSHOT_INTERVAL_MS / 1000} seconds</p></div>
-      <div className="actions">
-        <button onClick={capture}>Capture screen</button>
-        <button className={recording ? 'recording' : ''} onClick={toggleRecording}>{recording ? 'Stop sequence' : 'Start sequence'}</button>
-        <button onClick={() => latest && copy(latest)} disabled={!latest}>Copy latest</button>
-        <button onClick={clear} disabled={!frames.length}>Clear</button>
-      </div>
-    </div>
-    {!!frames.length && <div className="screenshot-strip">{[...frames].reverse().map((frame) => <article key={frame.id} className="screenshot-card">
-      <button className="screenshot-preview" onClick={() => copy(frame)} title="Copy screenshot"><img src={frame.dataUrl} alt={`${frame.label} at ${new Date(frame.capturedAt).toLocaleTimeString()}`} /></button>
-      <div className="meta">{new Date(frame.capturedAt).toLocaleTimeString()} · {frame.label}</div>
-      <div className="mini-actions"><button onClick={() => copy(frame)}>Copy image</button><button onClick={() => downloadDataUrl(`runtime-screen-${frame.capturedAt}.png`, frame.dataUrl)}>Download</button><button onClick={() => remove(frame.id)}>Delete</button></div>
-    </article>)}</div>}
-  </section>
-}
-
-function InvestigationDetails({ record, exportFormat, setExportFormat, copyDetails, exportDetails, reinvestigate, runAction, contextValid, aiModel, setAiModel, aiStatus, aiLoading, aiQuestion, setAiQuestion, aiAnswer, enhanceCurrent, askCurrent }: {
-  record: InvestigationRecord; exportFormat: ExportFormat; setExportFormat: (format: ExportFormat) => void
-  copyDetails: () => Promise<string>; exportDetails: () => string; reinvestigate: () => string
-  runAction: (action: 'compare' | 'source' | 'trace') => string; contextValid: boolean
-  aiModel: string; setAiModel: (model: string) => void; aiStatus: string; aiLoading: boolean
-  aiQuestion: string; setAiQuestion: (question: string) => void; aiAnswer: string
-  enhanceCurrent: () => void; askCurrent: () => void
-}) {
-  const { graph, result } = record
-  const [actionResult, setActionResult] = useState('')
-  return <section className="result">
-    <div className="result-heading"><div><h2>⚠ Likely cause</h2><p>{result.diagnosis}</p></div><div className="confidence">{Math.round(result.confidence * 100)}%<span>confidence</span></div></div>
-    <div className="badges"><span className="badge">{graph.request.status} {graph.request.method}</span>{graph.redactionApplied && <span className="badge">Sensitive data redacted</span>}<span className="badge">{record.occurrenceCount ?? 1} occurrence(s)</span></div>
-    <p className="request-url">{graph.request.url}</p>
-
-    <h3>Evidence</h3><ul className="list">{result.evidence.map((item) => <li key={item}>{item}</li>)}</ul>
-    {!!graph.anomalies.length && <><h3>Potential anomalies</h3><ul className="list">{graph.anomalies.map((item) => <li key={item}>{item}</li>)}</ul></>}
-    {!!graph.comparison?.semanticDiff?.length && <><h3>Compared with successful request</h3><ul className="list">{graph.comparison.semanticDiff.map((item) => <li key={item}>{item}</li>)}</ul></>}
-    <h3>Trace and source lines</h3><div className="trace">{graph.trace.map((step, index) => <div className="trace-item" key={`${step.label}:${index}`}><div><span className="step-number">{index + 1}</span>{step.label}</div>{step.source && <button className="source-link" onClick={() => openSourceLocation(step.source!, step.line)}>{step.source}{step.line ? `:${step.line}` : ''}</button>}</div>)}</div>
-
-    <EvidenceGraphView investigationId={record.id} />
-
-    {graph.bundle && <details><summary>Evidence bundle</summary><div className="bundle-grid">
-      <Bundle title="Request headers" value={graph.bundle.requestHeaders} />
-      <Bundle title="Response headers" value={graph.bundle.responseHeaders} />
-      <Bundle title="Request body" value={graph.bundle.requestBody} />
-      <Bundle title="Response body" value={graph.bundle.responseBody} />
-      <Bundle title="Runtime events and stacks" value={graph.bundle.runtimeEvents} />
-      <Bundle title="Environment" value={graph.bundle.environment} />
-      <Bundle title="Reproduction steps" value={graph.bundle.reproductionSteps} />
-    </div>{graph.bundle.screenshot && <><img className="screenshot" src={graph.bundle.screenshot} alt="Captured inspected page" /><button onClick={() => downloadDataUrl(`runtime-investigation-${record.id}.png`, graph.bundle!.screenshot!)}>Save screenshot</button></>}</details>}
-
-    <h3>Investigation actions</h3><div className="actions"><button onClick={() => setActionResult(runAction('compare'))}>Compare successful request</button><button onClick={() => setActionResult(runAction('source'))}>Show source</button><button onClick={() => setActionResult(runAction('trace'))}>Trace request</button><button onClick={() => setActionResult(reinvestigate())}>Investigate again</button></div>
-    {actionResult && <pre className="action-result">{actionResult}</pre>}
-    {!!result.nextActions.length && <><h3>Recommended follow-ups</h3><ul className="list">{result.nextActions.map((item) => <li key={item}>{item}</li>)}</ul></>}
-    <section className="local-ai">
-      <div className="local-ai-heading"><div><h3>Private local investigator</h3><p className="meta">WebLLM receives only a bounded redacted graph. The first run downloads the selected model.</p></div><select value={aiModel} onChange={(event) => setAiModel(event.target.value)} disabled={aiLoading}><option value={LOCAL_MODELS.smallest}>SmolLM2 360M · ~580 MB VRAM</option><option value={LOCAL_MODELS.balanced}>SmolLM2 1.7B · stronger</option></select></div>
-      {!isLocalAiAvailable() ? <p className="badge warn">WebGPU is unavailable. Deterministic diagnosis remains active.</p> : <div className="actions"><button className="primary" onClick={enhanceCurrent} disabled={aiLoading || !contextValid}>Enhance diagnosis locally</button>{aiLoading && <button onClick={interruptLocalAi}>Stop</button>}</div>}
-      <p className="status">{aiStatus}</p>
-      <div className="ask-row"><input value={aiQuestion} onChange={(event) => setAiQuestion(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') askCurrent() }} placeholder="Ask about this evidence graph" disabled={aiLoading || !isLocalAiAvailable() || !contextValid} /><button onClick={askCurrent} disabled={aiLoading || !aiQuestion.trim() || !isLocalAiAvailable() || !contextValid}>Ask</button></div>
-      {aiAnswer && <pre className="ai-answer">{aiAnswer}</pre>}
-    </section>
-    <div className="actions"><select value={exportFormat} onChange={(event) => setExportFormat(event.target.value as ExportFormat)}><option value="text">Plain text</option><option value="markdown">Markdown / GitHub</option><option value="jira">Jira</option><option value="json">JSON</option></select><button className="primary" onClick={() => void copyDetails().then(setActionResult)}>Copy all details</button><button onClick={() => setActionResult(exportDetails())}>Download report</button></div>
-  </section>
-}
-
-function EvidenceGraphView({ investigationId }: { investigationId: string }) {
-  const [neighborhood, setNeighborhood] = useState<EvidenceNeighborhood | null>(null)
-  useEffect(() => {
-    let active = true
-    const unsubscribe = feltRepository.subscribeNeighborhood(investigationId, (value) => { if (active) setNeighborhood(value) })
-    return () => { active = false; unsubscribe() }
-  }, [investigationId])
-  if (!neighborhood?.nodes.length) return null
-  const width = 680
-  const height = 300
-  const positions = new Map(neighborhood.nodes.map((node, index) => {
-    const angle = (index / neighborhood.nodes.length) * Math.PI * 2 - Math.PI / 2
-    const radius = node.id === neighborhood.rootId ? 0 : Math.min(width, height) * 0.36
-    return [node.id, { x: width / 2 + Math.cos(angle) * radius, y: height / 2 + Math.sin(angle) * radius }]
-  }))
-  return <details className="graph-details"><summary>Evidence graph · {neighborhood.nodes.length} nodes · {neighborhood.edges.length} edges</summary>
-    <svg className="evidence-graph" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Causal evidence graph">
-      {neighborhood.edges.map((edge) => { const from = positions.get(edge.from); const to = positions.get(edge.to); return from && to ? <g key={edge.id}><line x1={from.x} y1={from.y} x2={to.x} y2={to.y} /><text x={(from.x + to.x) / 2} y={(from.y + to.y) / 2}>{edge.kind}</text></g> : null })}
-      {neighborhood.nodes.map((node) => { const point = positions.get(node.id)!; return <g key={node.id} transform={`translate(${point.x} ${point.y})`}><circle r={node.id === neighborhood.rootId ? 28 : 21} className={`node-${node.kind}`} /><text y="4" textAnchor="middle">{node.kind.slice(0, 8)}</text><title>{node.label}</title></g> })}
-    </svg>
-    {neighborhood.truncated && <p className="meta">Graph was bounded to protect responsiveness and model context.</p>}
-    <table className="edge-table"><thead><tr><th>Relationship</th><th>Evidence</th><th>Confidence</th></tr></thead><tbody>{neighborhood.edges.map((edge) => <tr key={edge.id}><td>{edge.kind}</td><td>{edge.evidence.join(', ')}</td><td>{Math.round(edge.confidence * 100)}%</td></tr>)}</tbody></table>
-  </details>
-}
-
-function Bundle({ title, value }: { title: string; value: unknown }) {
-  if (value == null || (Array.isArray(value) && !value.length) || (typeof value === 'object' && !Array.isArray(value) && !Object.keys(value).length)) return null
-  return <div><h4>{title}</h4><pre>{typeof value === 'string' ? value : JSON.stringify(value, null, 2)}</pre></div>
 }
