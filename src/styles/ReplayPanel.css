@@ -1,0 +1,262 @@
+.replay-panel {
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  overflow: hidden;
+  margin: 12px 0;
+}
+
+.replay-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: #fafafa;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.2s;
+}
+
+.replay-header:hover {
+  background: #f5f5f5;
+}
+
+.replay-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+}
+
+.replay-icon {
+  font-size: 20px;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.replay-title {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.replay-id {
+  font-size: 12px;
+  font-weight: 600;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.replay-result {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.replay-stats {
+  display: flex;
+  gap: 24px;
+  margin: 0 20px;
+}
+
+.replay-confidence,
+.replay-count {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.confidence-value,
+.count-value {
+  font-size: 16px;
+  font-weight: 700;
+  color: #1f2937;
+}
+
+.confidence-label,
+.count-label {
+  font-size: 11px;
+  color: #9ca3af;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.replay-toggle {
+  background: none;
+  border: none;
+  padding: 8px;
+  cursor: pointer;
+  color: #6b7280;
+  font-size: 12px;
+  transition: color 0.2s;
+}
+
+.replay-toggle:hover {
+  color: #1f2937;
+}
+
+.replay-observations {
+  padding: 16px;
+  background: #f9fafb;
+  border-top: 1px solid #e5e7eb;
+}
+
+.observations-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.observation-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 12px;
+  background: white;
+  border-radius: 6px;
+  border-left: 3px solid #e5e7eb;
+  font-size: 13px;
+}
+
+.observation-item.observation-navigation {
+  border-left-color: #3b82f6;
+}
+
+.observation-item.observation-interaction {
+  border-left-color: #8b5cf6;
+}
+
+.observation-item.observation-network {
+  border-left-color: #10b981;
+}
+
+.observation-item.observation-target_request {
+  border-left-color: #f59e0b;
+}
+
+.observation-item.observation-runtime_error {
+  border-left-color: #ef4444;
+}
+
+.observation-item.observation-event {
+  border-left-color: #6b7280;
+}
+
+.observation-item.observation-outcome {
+  border-left-color: #1f2937;
+}
+
+.observation-icon {
+  font-weight: 600;
+  font-size: 12px;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.observation-icon.success {
+  background: #d1fae5;
+  color: #10b981;
+}
+
+.observation-icon.failure {
+  background: #fee2e2;
+  color: #ef4444;
+}
+
+.observation-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.observation-type {
+  font-weight: 600;
+  color: #1f2937;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  font-size: 11px;
+}
+
+.observation-description {
+  color: #6b7280;
+  line-height: 1.4;
+}
+
+.replay-inspect-btn {
+  width: 100%;
+  padding: 10px;
+  margin: 12px 0;
+  background: white;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  color: #374151;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.replay-inspect-btn:hover {
+  background: #f3f4f6;
+  border-color: #9ca3af;
+  color: #1f2937;
+}
+
+.replay-footer {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.replay-metadata {
+  display: flex;
+  gap: 16px;
+  font-size: 12px;
+  color: #9ca3af;
+  margin-bottom: 8px;
+}
+
+.replay-notes {
+  font-size: 12px;
+  color: #6b7280;
+  font-style: italic;
+  line-height: 1.4;
+}
+
+/* Responsive */
+@media (max-width: 640px) {
+  .replay-header {
+    flex-wrap: wrap;
+  }
+
+  .replay-stats {
+    gap: 16px;
+    margin: 8px 0 0 0;
+    width: 100%;
+    order: 3;
+  }
+
+  .replay-status {
+    width: 100%;
+    order: 1;
+  }
+
+  .replay-toggle {
+    order: 2;
+  }
+}
