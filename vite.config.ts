@@ -6,6 +6,11 @@ const rootDir = import.meta.dirname
 
 export default defineConfig({
   plugins: [react()],
+  resolve: {
+    alias: {
+      'runtime_investigator_wasm': path.resolve(rootDir, 'wasm-engine/pkg'),
+    },
+  },
   build: {
     rollupOptions: {
       input: {
