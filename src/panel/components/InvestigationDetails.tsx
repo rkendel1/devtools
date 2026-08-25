@@ -1,10 +1,11 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { openSourceLocation } from '../../lib/chrome'
 import { interruptLocalAi, isLocalAiAvailable, LOCAL_MODELS } from '../../lib/localAi'
 import type { InvestigationRecord } from '../../lib/types'
 import type { ExportFormat } from '../utils/export'
 import { downloadDataUrl } from '../utils/export'
 import { EvidenceGraphView } from './EvidenceGraphView'
+import { EvidenceInspector } from './EvidenceInspector'
 
 export function InvestigationDetails({ record, exportFormat, setExportFormat, copyDetails, exportDetails, reinvestigate, runAction, contextValid, aiModel, setAiModel, aiStatus, aiLoading, aiQuestion, setAiQuestion, aiAnswer, enhanceCurrent, askCurrent }: {
   record: InvestigationRecord; exportFormat: ExportFormat; setExportFormat: (format: ExportFormat) => void
@@ -16,6 +17,7 @@ export function InvestigationDetails({ record, exportFormat, setExportFormat, co
 }) {
   const { graph, result } = record
   const [actionResult, setActionResult] = useState('')
+  const [showEvidenceInspector, setShowEvidenceInspector] = useState(false)
   return <section className="result">
     <div className="result-heading"><div><h2>⚠ Likely cause</h2><p>{result.diagnosis}</p></div><div className="confidence">{Math.round(result.confidence * 100)}%<span>confidence</span></div></div>
     <div className="badges"><span className="badge">{graph.request.status} {graph.request.method}</span>{graph.redactionApplied && <span className="badge">Sensitive data redacted</span>}<span className="badge">{record.occurrenceCount ?? 1} occurrence(s)</span></div>
@@ -24,6 +26,15 @@ export function InvestigationDetails({ record, exportFormat, setExportFormat, co
     <h3>Evidence</h3><ul className="list">{result.evidence.map((item) => <li key={item}>{item}</li>)}</ul>
     {!!graph.anomalies.length && <><h3>Potential anomalies</h3><ul className="list">{graph.anomalies.map((item) => <li key={item}>{item}</li>)}</ul></>}
     {!!graph.comparison?.semanticDiff?.length && <><h3>Compared with successful request</h3><ul className="list">{graph.comparison.semanticDiff.map((item) => <li key={item}>{item}</li>)}</ul></>}
+    <h3>Causal Analysis</h3>
+    <div className="actions">
+      <button onClick={() => setShowEvidenceInspector(!showEvidenceInspector)} className="primary">
+        {showEvidenceInspector ? '▼' : '▶'} Why did this fail? (Interactive)
+      </button>
+    </div>
+
+    {showEvidenceInspector && <EvidenceInspectorWrapper investigationId={record.id} />}
+
     <h3>Trace and source lines</h3><div className="trace">{graph.trace.map((step, index) => <div className="trace-item" key={`${step.label}:${index}`}><div><span className="step-number">{index + 1}</span>{step.label}</div>{step.source && <button className="source-link" onClick={() => openSourceLocation(step.source!, step.line)}>{step.source}{step.line ? `:${step.line}` : ''}</button>}</div>)}</div>
 
     <EvidenceGraphView investigationId={record.id} />
@@ -55,4 +66,30 @@ export function InvestigationDetails({ record, exportFormat, setExportFormat, co
 function Bundle({ title, value }: { title: string; value: unknown }) {
   if (value == null || (Array.isArray(value) && !value.length) || (typeof value === 'object' && !Array.isArray(value) && !Object.keys(value).length)) return null
   return <div><h4>{title}</h4><pre>{typeof value === 'string' ? value : JSON.stringify(value, null, 2)}</pre></div>
+}
+
+function EvidenceInspectorWrapper({ investigationId }: { investigationId: string }) {
+  const [neighborhood, setNeighborhood] = useState<unknown>(null)
+
+  useEffect(() => {
+    let active = true
+    // Lazy load to avoid circular imports
+    void import('../../lib/feltRepository').then(({ feltRepository }) => {
+      if (active) {
+        const unsubscribe = feltRepository.subscribeNeighborhood(investigationId, (value: unknown) => {
+          if (active) setNeighborhood(value)
+        })
+        return () => {
+          active = false
+          unsubscribe()
+        }
+      }
+    })
+    return () => {
+      active = false
+    }
+  }, [investigationId])
+
+  if (!neighborhood) return <p className="meta">Loading evidence chain...</p>
+  return <EvidenceInspector neighborhood={neighborhood as any} />
 }
