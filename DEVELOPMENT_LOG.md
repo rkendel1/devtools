@@ -232,15 +232,22 @@ Hypothesis (<70%)            - Speculation (AI)
 | verificationLoop.ts | 250 | Comparison logic |
 | VerificationPanel.tsx | 210 | Comparison UI |
 | VerificationPanel.css | 400 | Styling |
-| **Phase 4** | | |
+| **Phase 4.1** | | |
 | replayContract.ts | 300 | Fixture + types |
 | replayEngine.ts | 200 | Execution (platform-agnostic) |
 | replayBrowser.ts | 90 | Platform abstraction |
 | cdpBridge.ts | 210 | DevTools Protocol bridge |
 | chromeReplayAdapter.ts | 240 | Chrome implementation |
 | replayController.ts | 200 | Message routing |
-| **Tests** | 420 | Unit + integration |
-| **Total** | **4,630** | **18 files + styling** |
+| replayEngine.test.ts | 200 | Engine tests |
+| chromeReplayAdapter.test.ts | 120 | Adapter tests |
+| **Phase 4.2** | | |
+| test-page.html | 130 | Deterministic test scenario |
+| test-server.js | 130 | Test API server |
+| phase42-integration.test.ts | 360 | Integration tests (10/10 passing) |
+| PHASE_42_EXECUTION.md | 200 | Manual execution guide |
+| **Tests** | 680 | Unit + integration (37 passing) |
+| **Total** | **5,740** | **21 files + docs + styling** |
 
 ---
 
@@ -309,6 +316,60 @@ Since Phase 4 has clean fixture contracts, Phase 5 just:
 - Mutate one variable
 - Execute
 - Compare outcome
+
+---
+
+### Phase 4.2: One Real Replay ✅ READY FOR EXECUTION (Test Infrastructure + Manual Guide)
+**Goal:** Prove extension can replay one captured failure against test page with real Chrome observations
+
+**What was built:**
+- `test-page.html` (130 lines)
+  - Deterministic checkout form (currency required validation)
+  - When currency=null → POST /api/checkout → 422 + console.error
+  - Controllable test scenario (currency_null vs currency_set)
+  - Cart state display for debugging
+
+- `test-server.js` (130 lines)
+  - Node.js test server on http://localhost:3000/
+  - GET / → serves test-page.html
+  - GET /api/cart → returns cart with currency=null
+  - POST /api/checkout → 422 if currency missing, 200 if provided
+  - CORS enabled for cross-origin testing
+
+- `phase42-integration.test.ts` (360 lines)
+  - RealisticBrowserMock simulating actual CDP observations
+  - 10 integration tests covering full flow
+  - Tests: navigation, interaction, network capture, target request, errors
+  - Outcome classification verification (REPRODUCED, NOT_REPRODUCED)
+  - Evidence chain completeness checks
+  - All 10 tests passing ✅
+
+- `PHASE_42_EXECUTION.md` (Execution guide)
+  - Manual steps to run against real Chrome
+  - Test scenarios (reproduce failure, verify fix, regression test)
+  - Troubleshooting guide
+  - Architecture flow diagram
+
+**Key Insight:**
+Test page is *under control*, not production. Gives deterministic ground truth.
+
+**Test Scenario:**
+```
+1. Load http://localhost:3000/
+2. Leave currency blank
+3. Click Checkout
+4. Observe: 422 + "currency_required"
+5. Replay captures: navigation ✓, interaction ✓, fixture ✓, target ✓, error ✓
+6. Classification: REPRODUCED ✓
+```
+
+**What this enables:**
+- Real Chrome execution (wire CDP to actual browser)
+- Verify REPRODUCED with actual observations (not faked)
+- Foundation for Phase 4.3 (persist to FeltDB + UI)
+- Proof that architecture works end-to-end
+
+**Next Milestone:** Wire real Chrome debugger + run manual test
 
 ---
 
