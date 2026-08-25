@@ -42,7 +42,7 @@ export function redactText(value: string | undefined): { redacted: string | unde
 
 function maybeRedactValue(value: string): string {
   const tokenPatterns = [
-    /bearer\s+[a-z0-9._\-]+/gi,
+    /bearer\s+[a-z0-9._-]+/gi,
     /("?(?:password|token|api[_-]?key|jwt)"?\s*[:=]\s*"?)([^",\s]+)/gi,
   ]
 

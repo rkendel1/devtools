@@ -37,36 +37,36 @@ export async function captureRequests(limit = 200): Promise<NetworkRequestSnapsh
   }
 
   return new Promise((resolve) => {
-    chrome.devtools.network.getHAR(async (harLog) => {
+    chrome.devtools.network.getHAR(async (harLog: { entries: Array<unknown> }) => {
       const entries = harLog.entries.slice(-limit)
       const output = await Promise.all(
         entries.map(
-          (entry) =>
+          (entry: unknown) =>
             new Promise<NetworkRequestSnapshot>((entryResolve) => {
-              const startedAt = new Date(entry.startedDateTime).getTime()
-              const requestRef = entry as unknown as ChromeRequest
+              const requestRef = entry as ChromeRequest
+              const startedAt = new Date(requestRef.startedDateTime).getTime()
 
               requestRef.getContent((content) => {
                 const frame = requestRef.initiator?.stack?.callFrames?.[0]
 
                 entryResolve({
-                  id: `${entry.request.method}:${entry.request.url}:${startedAt}`,
+                  id: `${requestRef.request.method}:${requestRef.request.url}:${startedAt}`,
                   startedAt,
-                  endedAt: startedAt + Math.round(entry.time),
-                  method: entry.request.method,
-                  url: entry.request.url,
-                  status: entry.response.status,
-                  statusText: entry.response.statusText,
-                  requestHeaders: headersToMap(entry.request.headers),
-                  responseHeaders: headersToMap(entry.response.headers),
-                  requestBody: entry.request.postData?.text,
+                  endedAt: startedAt + Math.round(requestRef.time ?? 0),
+                  method: requestRef.request.method,
+                  url: requestRef.request.url,
+                  status: requestRef.response.status,
+                  statusText: requestRef.response.statusText,
+                  requestHeaders: headersToMap(requestRef.request.headers),
+                  responseHeaders: headersToMap(requestRef.response.headers),
+                  requestBody: requestRef.request.postData?.text,
                   responseBody: content,
                   initiator: {
                     source: frame?.url,
                     line: typeof frame?.lineNumber === 'number' ? frame.lineNumber + 1 : undefined,
                     functionName: frame?.functionName,
                   },
-                  timingMs: entry.time,
+                  timingMs: requestRef.time,
                 })
               })
             }),
@@ -89,7 +89,7 @@ export async function captureConsoleEvents(limit = 50): Promise<ConsoleEvent[]> 
         const logs = window.__runtimeInvestigatorConsoleBuffer || [];
         return logs.slice(-${limit});
       })()`,
-      (result) => {
+      (result: unknown) => {
         if (chrome.runtime.lastError) {
           resolve([])
           return
