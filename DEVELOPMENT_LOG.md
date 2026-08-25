@@ -426,9 +426,66 @@ Current coverage:
 
 ---
 
+## Confidence System Evolution
+
+### Original (Phase 1-3)
+- Single number: 0-100%
+- "87% confident"
+
+### Enhanced (Phase 4+)
+- Multidimensional:
+  - **Causal**: Is this the root cause? (0-1)
+  - **Evidence**: How complete is the picture? (0-1)
+  - **Reproduction**: Can we reproduce it? (bool)
+  - **Counterfactual**: Confirmed with experiment? (bool)
+  - **Overall**: Weighted aggregate (0-1)
+
+Example:
+```
+Hypothesis: Race condition
+├── Causal confidence: 70% (sounds plausible)
+├── Evidence coverage: 40% (only partial trace)
+├── Reproduction: false (can't reproduce yet)
+├── Counterfactual: false (not tested)
+└── Overall: 52%
+
+After replay confirms it:
+├── Causal confidence: 70% (still same deduction)
+├── Evidence coverage: 40% (still partial)
+├── Reproduction: true ✓ (successfully reproduced)
+├── Counterfactual: false (not tested yet)
+└── Overall: 68%
+
+After counterfactual test (add delay, still fails):
+├── Causal confidence: 0% (disproven) ✗ REJECTED
+├── Evidence coverage: 100% (full trace now)
+├── Reproduction: true ✓
+├── Counterfactual: true ✓ (experiment confirmed it's not the issue)
+└── Overall: 25% (weighted down by causal failure)
+```
+
+This shows the scientific process: hypothesize → reproduce → experiment → confirm/reject.
+
+## Evidence Layers (Enhanced)
+
+```
+● OBSERVED   (100%)      Recorded data
+◐ INFERRED   (70-99%)    Logical deduction
+◯ HYPOTHESIS (<70%)      Speculation (often AI)
+✗ REJECTED   (0%)        Disproven explanation
+```
+
+Why REJECTED matters:
+- "We already tested this, it wasn't the issue"
+- Prevents wasted time on duplicate hypotheses
+- Shows investigation history, not just current belief
+
 ## Commits
 
 ```
+41f1810 Enhance evidence layers: Add REJECTED + multidimensional confidence
+1979dd6 Build Phase 4 Foundation: Replay Contract + Narrow Engine
+0ea8bc0 Add development log documenting Phases 1-3
 9f3173b Build Phase 3: Verify loop - before/after comparison
 29a695a Build Phase 2: Generate tests from failures (Reproduce feature)
 820f987 Build Phase 1: Perfect "Why?" with causal analysis UI
