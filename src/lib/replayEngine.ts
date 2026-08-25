@@ -1,29 +1,28 @@
 /**
- * Replay Engine: Execute a ReplayFixture and capture outcome
+ * Replay Engine: Execute a ReplayFixture against a ReplayBrowser abstraction
  *
- * Narrow scope: navigation + network mocking + single interaction + outcome capture
- * Don't try to reproduce arbitrary browser state yet.
- * Explicitly report unsupported features.
+ * Platform-agnostic. Consumes ReplayBrowser interface.
+ * Orchestrates: navigate → network setup → interactions → outcome capture
+ * Produces evidence event sequence (each event can become FeltDB node)
  */
 
 import type { ReplayFixture, ReplayRun, ReplayObservation, OutcomeSignature } from './replayContract'
-import { classifyOutcome, createResponseFingerprint, createErrorFingerprint } from './replayContract'
+import { classifyOutcome, createErrorFingerprint } from './replayContract'
+import type { ReplayBrowser, ReplayBrowserObservation } from './replayBrowser'
 
 export interface ReplayEngineOptions {
   timeout?: number
-  headless?: boolean
-  viewport?: { width: number; height: number }
 }
 
 export class ReplayEngine {
   private fixture: ReplayFixture
+  private browser: ReplayBrowser
   private observations: ReplayObservation[] = []
-  private interceptedRequests: Map<string, { request: unknown; response: unknown }> = new Map()
-  private runtimeErrors: Array<{ type: string; message: string; timestamp: number }> = []
   private options: ReplayEngineOptions
 
-  constructor(fixture: ReplayFixture, options: ReplayEngineOptions = {}) {
+  constructor(fixture: ReplayFixture, browser: ReplayBrowser, options: ReplayEngineOptions = {}) {
     this.fixture = fixture
+    this.browser = browser
     this.options = { timeout: 30000, ...options }
   }
 
@@ -34,7 +33,7 @@ export class ReplayEngine {
       // Step 1: Navigate to page
       await this.navigate()
 
-      // Step 2: Set up network mocks
+      // Step 2: Set up network fixtures
       await this.setupNetworkInterception()
 
       // Step 3: Execute interactions
@@ -42,81 +41,158 @@ export class ReplayEngine {
         await this.executeInteraction(interaction)
       }
 
-      // Step 4: Capture outcome
-      const replayOutcome = await this.captureOutcome()
+      // Step 4: Capture browser observations (network, runtime errors, target request)
+      await this.captureObservations()
 
-      // Step 5: Classify
+      // Step 5: Build outcome signature from captured events
+      const replayOutcome = this.buildOutcomeSignature()
+
+      // Step 6: Classify
       const status = classifyOutcome(originalOutcome, replayOutcome)
 
       return this.buildReplayRun(startTime, status, replayOutcome, originalOutcome)
     } catch (error) {
       return this.buildFailedRun(startTime, error)
+    } finally {
+      await this.browser.dispose()
     }
   }
 
   private async navigate(): Promise<void> {
-    this.addObservation('navigation', `Navigating to ${this.fixture.initialState.url}`, true)
-
-    // In a real implementation, this would use Chrome DevTools Protocol
-    // For now, we track what we attempted
-    // The actual navigation would be in the DevTools page context
-
-    this.addObservation('navigation', 'Page loaded (simulated)', true)
+    try {
+      await this.browser.navigate(this.fixture.initialState.url)
+      this.addObservation('navigation', `Navigate ${this.fixture.initialState.url}`, true)
+    } catch (error) {
+      this.addObservation('navigation', `Navigate ${this.fixture.initialState.url}`, false, {
+        error: error instanceof Error ? error.message : String(error),
+      })
+      throw error
+    }
   }
 
   private async setupNetworkInterception(): Promise<void> {
     if (this.fixture.networkFixtures.length === 0) {
-      this.addObservation('network', 'No network fixtures to set up', true)
+      this.addObservation('network', 'No network fixtures to install', true)
       return
     }
 
-    this.addObservation('network', `Setting up ${this.fixture.networkFixtures.length} network mocks`, true)
-
-    for (const fixture of this.fixture.networkFixtures) {
-      this.addObservation(
-        'network',
-        `Mock: ${fixture.method} ${fixture.pattern} → ${fixture.responseStatus}`,
-        true
-      )
+    try {
+      await this.browser.enableNetworkCapture(this.fixture.networkFixtures)
+      this.addObservation('network', `Install ${this.fixture.networkFixtures.length} fixtures`, true)
+    } catch (error) {
+      this.addObservation('network', `Install network fixtures`, false, {
+        count: this.fixture.networkFixtures.length,
+        error: error instanceof Error ? error.message : String(error),
+      })
+      throw error
     }
   }
 
   private async executeInteraction(interaction: any): Promise<void> {
-    if (interaction.type === 'navigate') {
-      this.addObservation('interaction', `Navigate to ${interaction.url}`, true)
-    } else if (interaction.type === 'click') {
-      this.addObservation('interaction', `Click on ${interaction.selector}`, true)
-    } else if (interaction.type === 'input') {
-      this.addObservation('interaction', `Input "${interaction.value}" to ${interaction.selector}`, true)
-    } else if (interaction.type === 'wait') {
-      this.addObservation('interaction', `Wait ${interaction.delayMs}ms`, true)
+    try {
+      if (interaction.type === 'navigate') {
+        await this.browser.navigate(interaction.url)
+        this.addObservation('interaction', `Navigate ${interaction.url}`, true)
+      } else if (interaction.type === 'click') {
+        await this.browser.click(interaction.selector)
+        this.addObservation('interaction', `Click ${interaction.selector}`, true)
+      } else if (interaction.type === 'input') {
+        await this.browser.input(interaction.selector, interaction.value)
+        this.addObservation('interaction', `Input "${interaction.value}" to ${interaction.selector}`, true)
+      } else if (interaction.type === 'wait') {
+        await this.browser.wait(interaction.delayMs)
+        this.addObservation('interaction', `Wait ${interaction.delayMs}ms`, true)
+      }
+    } catch (error) {
+      const desc =
+        interaction.type === 'navigate'
+          ? `Navigate ${interaction.url}`
+          : interaction.type === 'click'
+            ? `Click ${interaction.selector}`
+            : interaction.type === 'input'
+              ? `Input to ${interaction.selector}`
+              : `Wait ${interaction.delayMs}ms`
+
+      this.addObservation('interaction', desc, false, {
+        error: error instanceof Error ? error.message : String(error),
+      })
+      throw error
     }
   }
 
-  private async captureOutcome(): Promise<OutcomeSignature> {
-    // This would capture:
-    // - The target request that was made
-    // - Response status and body
-    // - Any errors that occurred
-    // - Timing information
+  private async captureObservations(): Promise<void> {
+    const browserObservations = await this.browser.collectObservations()
 
-    // For now, return a placeholder that would be populated by actual replay
+    for (const obs of browserObservations) {
+      this.addObservation(obs.type as any, obs.description, obs.success, {
+        event: obs.event,
+        ...obs.details,
+      })
+    }
+  }
+
+  private buildOutcomeSignature(): OutcomeSignature {
+    // Extract target request observation
+    const targetObservation = this.observations.find(
+      (o) =>
+        (o.type === 'event' || o.type === 'target_request') &&
+        o.details?.event?.method === this.fixture.target.requestMethod &&
+        o.details?.event?.url === this.fixture.target.requestUrl
+    )
+
+    const targetRequest = targetObservation?.details?.event as any
+
+    // Collect runtime errors
+    const errorObservations = this.observations.filter(
+      (o) => (o.type === 'event' || o.type === 'runtime_error') && o.details?.event?.fingerprint
+    )
+    const errorFingerprints = errorObservations.map((o) => o.details?.event?.fingerprint || '')
+
+    const status = targetRequest?.status || 0
+    const statusText = targetRequest?.statusText || 'UNKNOWN'
+
+    // Build fingerprint from response
+    let responseFingerprint = ''
+    if (targetRequest) {
+      const parts = [status.toString(), Object.keys(targetRequest?.headers || {}).join(',')]
+      let hash = 0
+      for (const part of parts) {
+        for (let i = 0; i < part.length; i++) {
+          const char = part.charCodeAt(i)
+          hash = (hash << 5) - hash + char
+          hash = hash & hash
+        }
+      }
+      responseFingerprint = `fp:${Math.abs(hash)}`
+    }
+
+    const timing = targetRequest
+      ? {
+          requestDuration: targetRequest.responseTime - targetRequest.requestTime,
+          totalTime: Date.now() - (this.observations[0]?.timestamp || Date.now()),
+        }
+      : {
+          requestDuration: 0,
+          totalTime: Date.now() - (this.observations[0]?.timestamp || Date.now()),
+        }
+
     return {
       targetRequest: {
         method: this.fixture.target.requestMethod,
         url: this.fixture.target.requestUrl,
       },
-      status: 0,
-      statusText: 'NOT_YET_CAPTURED',
-      responseFingerprint: '',
-      errorFingerprints: [],
-      errorCount: 0,
-      relevantRuntimeEvents: [],
-      timing: {
-        requestDuration: 0,
-        totalTime: Date.now(),
-      },
-      causalEvidence: [],
+      status,
+      statusText,
+      responseFingerprint,
+      errorFingerprints,
+      errorCount: errorFingerprints.length,
+      relevantRuntimeEvents: errorObservations.map((o) => ({
+        type: o.details?.event?.source || 'console.error',
+        message: o.details?.event?.message || '',
+        fingerprint: o.details?.event?.fingerprint || '',
+      })),
+      timing,
+      causalEvidence: this.fixture.evidenceRefs.investigationNodeId ? [this.fixture.evidenceRefs.investigationNodeId] : [],
     }
   }
 
@@ -230,11 +306,11 @@ export class ReplayEngine {
   private detectUnsupportedCapabilities(): string[] {
     const unsupported: string[] = []
 
-    if (this.fixture.capabilities.localStorage && this.fixture.initialState.localStorage) {
+    if (!this.fixture.capabilities.localStorage && this.fixture.initialState.localStorage) {
       unsupported.push('localStorage')
     }
 
-    if (this.fixture.capabilities.cookies && this.fixture.initialState.cookies?.length) {
+    if (!this.fixture.capabilities.cookies && this.fixture.initialState.cookies?.length) {
       unsupported.push('cookies')
     }
 
@@ -245,8 +321,9 @@ export class ReplayEngine {
     if (this.observations.some((o) => !o.success)) {
       return 'Some observations failed; see details'
     }
-    if (this.detectUnsupportedCapabilities().length > 0) {
-      return `Unsupported: ${this.detectUnsupportedCapabilities().join(', ')}`
+    const unsupported = this.detectUnsupportedCapabilities()
+    if (unsupported.length > 0) {
+      return `Unsupported: ${unsupported.join(', ')}`
     }
     return 'Replay completed successfully'
   }
@@ -260,9 +337,10 @@ export class ReplayEngine {
 
 export async function executeReplay(
   fixture: ReplayFixture,
+  browser: ReplayBrowser,
   originalOutcome: OutcomeSignature,
   options?: ReplayEngineOptions
 ): Promise<ReplayRun> {
-  const engine = new ReplayEngine(fixture, options)
+  const engine = new ReplayEngine(fixture, browser, options)
   return engine.execute(originalOutcome)
 }

@@ -236,23 +236,21 @@ export function classifyOutcome(
   original: OutcomeSignature,
   replay: OutcomeSignature
 ): ReplayOutcomeStatus {
-  // REPRODUCED: Same status + error count + behavior
-  if (original.status === replay.status && original.errorCount === replay.errorCount) {
-    if (original.responseFingerprint === replay.responseFingerprint) {
-      return 'REPRODUCED'
-    }
-    // Status matches but response differs slightly
-    if (original.errorFingerprints.length === replay.errorFingerprints.length) {
-      return 'REPRODUCED'
-    }
+  // REPRODUCED: Same status + error count + response fingerprint (complete match)
+  if (
+    original.status === replay.status &&
+    original.errorCount === replay.errorCount &&
+    original.responseFingerprint === replay.responseFingerprint
+  ) {
+    return 'REPRODUCED'
   }
 
-  // PARTIAL: Same error pattern but different timing/payload
+  // PARTIAL: Same status and error count but response differs (partial match)
   if (original.status === replay.status && original.errorCount === replay.errorCount) {
     return 'PARTIAL'
   }
 
-  // NOT_REPRODUCED: Different outcome
+  // NOT_REPRODUCED: Status or error count differs
   if (original.status !== replay.status || original.errorCount !== replay.errorCount) {
     return 'NOT_REPRODUCED'
   }

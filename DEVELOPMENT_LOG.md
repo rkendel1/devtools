@@ -222,7 +222,8 @@ Hypothesis (<70%)            - Speculation (AI)
 
 | Module | Lines | Purpose |
 |--------|-------|---------|
-| evidenceLayers.ts | 120 | Evidence classification |
+| **Phase 1-3** | | |
+| evidenceLayers.ts | 180 | Evidence classification |
 | EvidenceInspector.tsx | 230 | Interactive analysis UI |
 | EvidenceInspector.css | 480 | Styling |
 | testGeneration.ts | 200 | Test generation logic |
@@ -231,8 +232,15 @@ Hypothesis (<70%)            - Speculation (AI)
 | verificationLoop.ts | 250 | Comparison logic |
 | VerificationPanel.tsx | 210 | Comparison UI |
 | VerificationPanel.css | 400 | Styling |
-| Tests | 300 | Test suites |
-| **Total** | **2,800** | **9 files + styling** |
+| **Phase 4** | | |
+| replayContract.ts | 300 | Fixture + types |
+| replayEngine.ts | 200 | Execution (platform-agnostic) |
+| replayBrowser.ts | 90 | Platform abstraction |
+| cdpBridge.ts | 210 | DevTools Protocol bridge |
+| chromeReplayAdapter.ts | 240 | Chrome implementation |
+| replayController.ts | 200 | Message routing |
+| **Tests** | 420 | Unit + integration |
+| **Total** | **4,630** | **18 files + styling** |
 
 ---
 
@@ -304,21 +312,135 @@ Since Phase 4 has clean fixture contracts, Phase 5 just:
 
 ---
 
+### Phase 4.1: One Real Replay ✅ FOUNDATION COMPLETE (Architecture + Tests)
+**Goal:** Prove extension can replay one captured failure against currently inspected tab
+
+**What was built:**
+- `replayBrowser.ts` (90 lines)
+  - Platform-agnostic ReplayBrowser interface
+  - Abstracts navigation, interaction, network, runtime capture
+  - Implementations: ChromeReplayAdapter, PlaywrightReplayAdapter, etc.
+  - Evidence observation types: navigation, interaction, network, runtime_error, target_request
+
+- `cdpBridge.ts` (210 lines)
+  - Chrome DevTools Protocol wrapper
+  - Wraps `chrome.debugger` API (available in extension context)
+  - Methods: attach, detach, sendCommand, navigate, evaluate, click, type, waitForSelector
+  - Network capture: enableNetworkCapture, getNetworkRequests
+  - Runtime capture: getRuntimeErrors
+  - Event listeners for debugger events
+
+- `chromeReplayAdapter.ts` (240 lines)
+  - Implements ReplayBrowser using CDP bridge
+  - Operates against currently inspected tab (no browser launcher)
+  - URL matching with wildcard support
+  - Intelligent request classification: FIXTURE_MATCHED | UNMATCHED | IGNORED
+  - Ignores analytics/tracking: Segment, Mixpanel, Google Analytics, Sentry, etc.
+  - Produces event sequence for FeltDB evidence nodes
+
+- **Modified replayEngine.ts** (refactored, ~200 lines)
+  - Now consumes ReplayBrowser abstraction (platform-agnostic)
+  - Orchestrates: navigate → network setup → interactions → outcome capture
+  - Builds OutcomeSignature from browser observations
+  - Evidence-aware: links back to original investigation
+  - Error handling per step with detailed observations
+
+- `replayController.ts` (200 lines)
+  - Message-passing orchestration across extension boundaries
+  - DevTools Panel → Background → Chrome Adapter → Inspected Tab
+  - Respects Chrome architecture: panel ≠ worker ≠ content script ≠ inspected page
+  - UI helpers: sendReplayRequest, onReplayStatus, onReplayError
+
+**Tests:**
+- `replayEngine.test.ts` (200 lines)
+  - Mock ReplayBrowser implementation
+  - Tests REPRODUCED, PARTIAL, NOT_REPRODUCED classification
+  - Interaction execution (click, input, wait)
+  - Error handling and observation recording
+  - Confidence calculation
+
+- `chromeReplayAdapter.test.ts` (120 lines)
+  - Mocks chrome.debugger API
+  - Tests navigation, click, input
+  - Network capture setup
+  - Debugger attachment lifecycle
+
+**Key Architectural Decisions:**
+1. **No browser launcher** - Uses currently inspected tab (constraint of extension)
+2. **ReplayBrowser abstraction** - Engine never knows about Chrome
+3. **Message passing** - Respects extension boundary/privilege separation
+4. **Event sequence** - Each step produces FeltDB-linkable observation
+5. **Selective interception** - Only intercept fixtures, not all traffic
+6. **Smart request filtering** - Ignores analytics/tracking automatically
+7. **Evidence-linked** - Replay outcome links to original investigation
+
+**Deliverables:**
+```
+✓ Platform-agnostic replay engine
+✓ Chrome DevTools Protocol bridge
+✓ Chrome-specific adapter implementing ReplayBrowser
+✓ Message-passing controller for extension boundaries
+✓ Evidence observation sequence for FeltDB integration
+✓ Network request classification (MATCHED/UNMATCHED/IGNORED)
+✓ Runtime error capture and fingerprinting
+✓ Target request extraction and OutcomeSignature building
+✓ Comprehensive test suite (platform-agnostic + Chrome-specific)
+```
+
+**What this enables Phase 4.2:**
+```
+Currently: Stubbed CDP integration → Tests passing with mocks
+Phase 4.2: Real CDP against real Chrome → E2E test with actual browser
+Phase 4.3: Replay UI → Visual status + evidence inspector
+Phase 4.4: Export to Playwright → Convert verified replay to CI test
+```
+
+**Integration Points:**
+- ReplayEngine consumes ReplayBrowser interface (no import of Chrome specifics)
+- ChromeReplayAdapter uses CDPBridge for protocol communication
+- ReplayController handles message routing between extension contexts
+- InvestigationDetails will consume ReplayController to start replays
+- EvidenceInspector can visualize replay observations as evidence chain
+
+**Testing Strategy:**
+- Unit: ReplayEngine works with any ReplayBrowser (test with mock)
+- Unit: ChromeReplayAdapter correctly wraps CDP
+- Integration: ReplayController message passing (with mocked chrome.runtime)
+- E2E: Real Chrome tab execution (Phase 4.2)
+
+---
+
 ## Future Phases (Planned)
 
+### Phase 4.2: Real Chrome Execution
+- Hook CDP to actual Chrome tab
+- Test with real failure: POST /checkout → 422
+- Verify REPRODUCED classification end-to-end
+- Add replay UI with status indicators
+
+### Phase 4.3: Replay UI
+- Show replay progress: Preparing → Running → Capturing → Comparing
+- Display evidence observations as traversable chain
+- Side-by-side comparison with original investigation
+- Export replay as shareable artifact
+
+### Phase 4.4: Playwright Export
+- Convert verified replay to Playwright test
+- Save to CI-ready format
+- Export with network mocks + interactions
+- Acceptance: Test runs in CI, reproduces same failure
+
 ### Phase 5: Counterfactual (Isolate Causal Conditions)
-- Make investigations searchable, reusable, shareable
-- Leverage FeltDB to support graph queries
-- "Find similar investigations" pattern matching
-- Export investigations as structured data (JSON-LD)
+- Mutate fixture variables (currency, delay, status)
+- Re-run replay, observe changes
+- Isolate causal conditions: "what's necessary and sufficient?"
 - Estimate: 3-4 weeks
 
-### Phase 5: Automatic Anomaly Detection
-- Baseline learning (normal behavior)
-- Anomaly scoring (deviation detection)
-- Auto-correlation with commits
-- Proactive investigation triggering
-- Estimate: 4-6 weeks
+### Phase 6: Automatic Root Cause (Graph Traversal)
+- Traverse evidence graph, test removing each causal node
+- Binary search for minimal causal condition
+- Automated hypothesis validation
+- Estimate: 2-3 weeks
 
 ## What This Enables
 
