@@ -269,6 +269,70 @@ pre {
   border: 1px solid #334155;
 }
 
+.screenshot-panel {
+  margin: 12px 0 16px;
+  padding: 10px;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #0b1220;
+}
+
+.screenshot-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.screenshot-toolbar h3,
+.screenshot-toolbar p {
+  margin: 0 0 4px;
+}
+
+button.recording {
+  border-color: #ef4444;
+  background: #7f1d1d;
+  color: #fee2e2;
+}
+
+.screenshot-strip {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(190px, 240px);
+  gap: 9px;
+  margin-top: 10px;
+  padding-bottom: 4px;
+  overflow-x: auto;
+}
+
+.screenshot-card {
+  min-width: 0;
+  padding: 7px;
+  border: 1px solid #334155;
+  border-radius: 7px;
+  background: #111827;
+}
+
+.screenshot-preview {
+  display: block;
+  width: 100%;
+  height: 120px;
+  padding: 0;
+  overflow: hidden;
+  border-radius: 5px;
+  background: #020617;
+}
+
+.screenshot-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.screenshot-card > .meta {
+  margin: 6px 0;
+}
+
 .graph-details {
   background: #0b1220;
 }
@@ -428,7 +492,8 @@ pre {
   }
 
   .local-ai-heading,
-  .ask-row {
+  .ask-row,
+  .screenshot-toolbar {
     flex-direction: column;
   }
 

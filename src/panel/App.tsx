@@ -16,8 +16,11 @@ import type { InvestigationRecord, NetworkRequestSnapshot, PrivacySettings } fro
 
 type ExportFormat = 'text' | 'markdown' | 'jira' | 'json'
 type Filters = { query: string; status: string; domain: string; type: string; timeframe: string }
+type ScreenshotFrame = { id: string; dataUrl: string; capturedAt: number; label: string }
 
 const EMPTY_FILTERS: Filters = { query: '', status: 'all', domain: 'all', type: 'all', timeframe: 'all' }
+const MAX_SCREENSHOTS = 12
+const SCREENSHOT_INTERVAL_MS = 3000
 
 function formatRequest(request: NetworkRequestSnapshot): string {
   const url = request.url.length > 90 ? `${request.url.slice(0, 90)}…` : request.url
@@ -77,7 +80,10 @@ export default function App() {
   const [historyQuery, setHistoryQuery] = useState('')
   const [exportFormat, setExportFormat] = useState<ExportFormat>('text')
   const [autoInvestigate, setAutoInvestigate] = useState(true)
-  const [includeScreenshot, setIncludeScreenshot] = useState(false)
+  const [screenshots, setScreenshots] = useState<ScreenshotFrame[]>([])
+  const screenshotsRef = useRef<ScreenshotFrame[]>([])
+  const [recordingScreens, setRecordingScreens] = useState(false)
+  const screenshotBusy = useRef(false)
   const [showPrivacy, setShowPrivacy] = useState(false)
   const [redactionPreview, setRedactionPreview] = useState('')
   const [loading, setLoading] = useState(false)
@@ -95,6 +101,7 @@ export default function App() {
   useEffect(() => { requestsRef.current = requests }, [requests])
   useEffect(() => { historyRef.current = history }, [history])
   useEffect(() => { privacyRef.current = privacy }, [privacy])
+  useEffect(() => { screenshotsRef.current = screenshots }, [screenshots])
 
   useEffect(() => {
     let cancelled = false
@@ -183,13 +190,11 @@ export default function App() {
   async function investigateRequest(request: NetworkRequestSnapshot, automatic = false): Promise<void> {
     if (!automatic) setLoading(true)
     try {
-      const [events, environment, screenshot] = await Promise.all([
-        captureConsoleEvents(500), captureEnvironment(), includeScreenshot ? captureScreenshot() : undefined,
-      ])
+      const [events, environment] = await Promise.all([captureConsoleEvents(500), captureEnvironment()])
       const peer = [...requestsRef.current].reverse().find((candidate) =>
         endpointKey(candidate) === endpointKey(request) && candidate.status < 400 && candidate.id !== request.id,
       )
-      const graph = buildEvidenceGraph(request, peer, requestsRef.current, events, privacyRef.current, environment, screenshot)
+      const graph = buildEvidenceGraph(request, peer, requestsRef.current, events, privacyRef.current, environment)
       const result = reasonFromEvidence(graph)
       const fingerprint = `${endpointKey(request)}|${request.status}|${result.diagnosis}`
       const now = Date.now()
@@ -223,6 +228,41 @@ export default function App() {
   // The listener reads current values from refs; resubscribe only when auto mode changes.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoInvestigate])
+
+  useEffect(() => {
+    if (!recordingScreens) return
+    const take = async () => {
+      if (screenshotBusy.current) return
+      if (screenshotsRef.current.length >= MAX_SCREENSHOTS) {
+        setRecordingScreens(false)
+        setMessage(`Screenshot sequence stopped at the ${MAX_SCREENSHOTS}-frame memory cap.`)
+        return
+      }
+      screenshotBusy.current = true
+      try {
+        const dataUrl = await captureScreenshot()
+        if (!dataUrl) {
+          setRecordingScreens(false)
+          setMessage('Screen capture was not permitted for the inspected tab.')
+          return
+        }
+        const next = [...screenshotsRef.current, {
+          id: crypto.randomUUID(), dataUrl, capturedAt: Date.now(), label: 'Sequence capture',
+        }].slice(-MAX_SCREENSHOTS)
+        screenshotsRef.current = next
+        setScreenshots(next)
+        if (next.length >= MAX_SCREENSHOTS) {
+          setRecordingScreens(false)
+          setMessage(`Screenshot sequence complete at the ${MAX_SCREENSHOTS}-frame memory cap.`)
+        }
+      } finally {
+        screenshotBusy.current = false
+      }
+    }
+    void take()
+    const timer = window.setInterval(() => void take(), SCREENSHOT_INTERVAL_MS)
+    return () => window.clearInterval(timer)
+  }, [recordingScreens])
 
   useEffect(() => {
     const timer = window.setInterval(() => void captureConsoleEvents(500).then((events) => {
@@ -271,6 +311,37 @@ export default function App() {
     setPrivacy(next)
     privacyRef.current = next
     savePrivacy(next)
+  }
+
+  async function captureFrame(): Promise<void> {
+    if (screenshotBusy.current) return
+    screenshotBusy.current = true
+    try {
+      const dataUrl = await captureScreenshot()
+      if (!dataUrl) {
+        setMessage('Screen capture was not permitted for the inspected tab.')
+        return
+      }
+      const next = [...screenshotsRef.current, {
+        id: crypto.randomUUID(), dataUrl, capturedAt: Date.now(), label: 'Manual capture',
+      }].slice(-MAX_SCREENSHOTS)
+      screenshotsRef.current = next
+      setScreenshots(next)
+      setMessage('Screenshot captured in memory.')
+    } finally {
+      screenshotBusy.current = false
+    }
+  }
+
+  async function copyScreenshot(frame: ScreenshotFrame): Promise<void> {
+    try {
+      const blob = await fetch(frame.dataUrl).then((response) => response.blob())
+      if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') throw new Error('Image clipboard is unavailable.')
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+      setMessage('Screenshot copied as an image. Paste it into any image-capable app.')
+    } catch (error) {
+      setMessage(`Could not copy screenshot: ${String(error)}`)
+    }
   }
 
   async function enhanceCurrent(): Promise<void> {
@@ -328,7 +399,6 @@ export default function App() {
           <label>Additional sensitive fields<input value={privacy.sensitiveKeys.join(', ')} onChange={(event) => updatePrivacy({ ...privacy, sensitiveKeys: event.target.value.split(',').map((key) => key.trim()).filter(Boolean) })} placeholder="accountId, secret" /></label>
           <label><input type="checkbox" checked={privacy.includeHeaders} onChange={(event) => updatePrivacy({ ...privacy, includeHeaders: event.target.checked })} /> Include redacted headers</label>
           <label><input type="checkbox" checked={privacy.includeBodies} onChange={(event) => updatePrivacy({ ...privacy, includeBodies: event.target.checked })} /> Include redacted bodies</label>
-          <label><input type="checkbox" checked={includeScreenshot} onChange={(event) => setIncludeScreenshot(event.target.checked)} /> Include page screenshot when Chrome permits it</label>
           <label>Redaction preview<input value={redactionPreview} onChange={(event) => setRedactionPreview(event.target.value)} placeholder={'{"accountId":"secret"}'} /><pre>{redactText(redactionPreview, privacy.sensitiveKeys).redacted || 'Enter sample text to preview redaction.'}</pre></label>
         </section>}
 
@@ -350,6 +420,16 @@ export default function App() {
           <button className="primary" onClick={() => selectedRequest && void investigateRequest(selectedRequest)} disabled={loading || !selectedRequest}>Investigate</button>
         </div>
         <p className="status" aria-live="polite">{message}</p>
+
+        <ScreenshotGallery
+          frames={screenshots}
+          recording={recordingScreens}
+          capture={() => void captureFrame()}
+          toggleRecording={() => setRecordingScreens((value) => !value)}
+          copy={(frame) => void copyScreenshot(frame)}
+          remove={(id) => setScreenshots((current) => current.filter((frame) => frame.id !== id))}
+          clear={() => { setRecordingScreens(false); setScreenshots([]); setMessage('In-memory screenshots cleared.') }}
+        />
 
         {investigation ? <InvestigationDetails record={investigation} exportFormat={exportFormat} setExportFormat={setExportFormat} copyDetails={copyDetails} exportDetails={exportDetails} reinvestigate={() => {
           const request = requestsRef.current.find((item) => item.id === investigation.requestId)
@@ -386,6 +466,29 @@ export default function App() {
       </aside>
     </div>
   )
+}
+
+function ScreenshotGallery({ frames, recording, capture, toggleRecording, copy, remove, clear }: {
+  frames: ScreenshotFrame[]; recording: boolean; capture: () => void; toggleRecording: () => void
+  copy: (frame: ScreenshotFrame) => void; remove: (id: string) => void; clear: () => void
+}) {
+  const latest = frames.at(-1)
+  return <section className="screenshot-panel">
+    <div className="screenshot-toolbar">
+      <div><h3>Screenshots <span className="count">{frames.length}/{MAX_SCREENSHOTS}</span></h3><p className="meta">Memory only · sequence captures every {SCREENSHOT_INTERVAL_MS / 1000} seconds</p></div>
+      <div className="actions">
+        <button onClick={capture}>Capture screen</button>
+        <button className={recording ? 'recording' : ''} onClick={toggleRecording}>{recording ? 'Stop sequence' : 'Start sequence'}</button>
+        <button onClick={() => latest && copy(latest)} disabled={!latest}>Copy latest</button>
+        <button onClick={clear} disabled={!frames.length}>Clear</button>
+      </div>
+    </div>
+    {!!frames.length && <div className="screenshot-strip">{[...frames].reverse().map((frame) => <article key={frame.id} className="screenshot-card">
+      <button className="screenshot-preview" onClick={() => copy(frame)} title="Copy screenshot"><img src={frame.dataUrl} alt={`${frame.label} at ${new Date(frame.capturedAt).toLocaleTimeString()}`} /></button>
+      <div className="meta">{new Date(frame.capturedAt).toLocaleTimeString()} · {frame.label}</div>
+      <div className="mini-actions"><button onClick={() => copy(frame)}>Copy image</button><button onClick={() => downloadDataUrl(`runtime-screen-${frame.capturedAt}.png`, frame.dataUrl)}>Download</button><button onClick={() => remove(frame.id)}>Delete</button></div>
+    </article>)}</div>}
+  </section>
 }
 
 function InvestigationDetails({ record, exportFormat, setExportFormat, copyDetails, exportDetails, reinvestigate, runAction, contextValid, aiModel, setAiModel, aiStatus, aiLoading, aiQuestion, setAiQuestion, aiAnswer, enhanceCurrent, askCurrent }: {

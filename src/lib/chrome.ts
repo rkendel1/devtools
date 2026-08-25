@@ -116,8 +116,11 @@ export async function captureEnvironment(): Promise<{ pageUrl?: string; userAgen
 
 export async function captureScreenshot(): Promise<string | undefined> {
   if (!hasChromeDevtools() || !chrome.tabs?.captureVisibleTab) return undefined
-  return new Promise((resolve) => chrome.tabs.captureVisibleTab({ format: 'png' }, (dataUrl) => {
-    resolve(chrome.runtime.lastError ? undefined : dataUrl)
+  return new Promise((resolve) => chrome.tabs.get(chrome.devtools.inspectedWindow.tabId, (tab) => {
+    if (chrome.runtime.lastError || tab.windowId == null) return resolve(undefined)
+    chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' }, (dataUrl) => {
+      resolve(chrome.runtime.lastError ? undefined : dataUrl)
+    })
   }))
 }
 
