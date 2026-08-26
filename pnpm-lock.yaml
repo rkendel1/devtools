@@ -9,14 +9,14 @@ importers:
   .:
     dependencies:
       '@feltdb/core':
-        specifier: ^0.6.0
-        version: 0.6.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+        specifier: ^0.6.2
+        version: 0.6.2(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@feltdb/development-runtime':
         specifier: file:./packages/development-runtime
         version: file:packages/development-runtime(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@feltdb/webllm':
-        specifier: ^0.6.0
-        version: 0.6.0
+        specifier: ^0.6.2
+        version: 0.6.2
       react:
         specifier: ^19.2.8
         version: 19.2.8
@@ -24,6 +24,9 @@ importers:
         specifier: ^19.2.8
         version: 19.2.8(react@19.2.8)
     devDependencies:
+      '@playwright/test':
+        specifier: ^1.62.1
+        version: 1.62.1
       '@types/chrome':
         specifier: ^0.2.7
         version: 0.2.7
@@ -258,8 +261,8 @@ packages:
       react-router-dom:
         optional: true
 
-  '@feltdb/core@0.6.0':
-    resolution: {integrity: sha512-ijJjdFf5WLpdJtdiqDKiWtJqFlLl3I5TbmkKHkLkFkHfIlFU8Z0N6/R4Js42bk93qRh2BiOcx38OMfURrJ5pFg==}
+  '@feltdb/core@0.6.2':
+    resolution: {integrity: sha512-fDi+BME1UWJI4Wy2CrFF75oPOr8u1/AhBoiUEllWlh/A8ie0RVvJk3E+StGnmrGa/MG7RSpvQc4LhrEi5Jj+Jw==}
     engines: {node: '>=14'}
     hasBin: true
     peerDependencies:
@@ -277,8 +280,8 @@ packages:
   '@feltdb/development-runtime@file:packages/development-runtime':
     resolution: {directory: packages/development-runtime, type: directory}
 
-  '@feltdb/webllm@0.6.0':
-    resolution: {integrity: sha512-M0pX4M+xP0fpZmztN4utQYoz3QyYEVC1PTQW2jfvl2Of6j8fvRg/QkA0CDzPEkhMLFuohABtIs2UuAhYlx99LA==}
+  '@feltdb/webllm@0.6.2':
+    resolution: {integrity: sha512-JUAZ7zZ93Xvvcxt4VQyuYnUsgS58BcZLVDt/7MM8P4xEuf5MoOqfWPGrithgFOtcuFCRi3dBmQ8n7PqZ/W43qA==}
 
   '@isaacs/cliui@8.0.2':
     resolution: {integrity: sha512-O8jcjabXaleOG9DQ0+ARXWZBTfnP4WNAqzuiJK7ll44AmxGKv/J2M4TPjxjY3znBCfvBXFzucm1twdyFybFqEA==}
@@ -456,6 +459,11 @@ packages:
   '@pkgjs/parseargs@0.11.0':
     resolution: {integrity: sha512-+1VkjdD0QBLPodGrJUeqarH8VAIvQODIbwh9XpP5Syisf7YoQgsJKPNFoqqLQlu+VQ/tVSshMR6loPMn8U+dPg==}
     engines: {node: '>=14'}
+
+  '@playwright/test@1.62.1':
+    resolution: {integrity: sha512-DTcUc8qii+cpHvtOwggMtBRMjKZHXYWdw8syRYu2vtzuq4Wxphqq4NfCs5Zt44L6mA8rfDfj+PHnxFc/FeK6mQ==}
+    engines: {node: '>=20'}
+    hasBin: true
 
   '@promptbook/utils@0.69.5':
     resolution: {integrity: sha512-xm5Ti/Hp3o4xHrsK9Yy3MS6KbDxYbq485hDsFvxqaNA7equHLPdo8H8faTitTeb14QCDfLW4iwCxdVYu5sn6YQ==}
@@ -1379,6 +1387,11 @@ packages:
   fs.realpath@1.0.0:
     resolution: {integrity: sha512-OO0pH2lK6a0hZnAdau5ItzHPI6pUlvI7jMVnxUQRtw4owF2wk8lOSabtGDCTP4Ggrg2MbGnWO9X8K1t4+fGMDw==}
 
+  fsevents@2.3.2:
+    resolution: {integrity: sha512-xiqMQR4xAeHTuB9uWm+fFRcIOgKBMiOBP+eXiyT7jsgVCq1bkVygt00oASowB7EdtpOHaaPgKt812P9ab+DDKA==}
+    engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
+    os: [darwin]
+
   fsevents@2.3.3:
     resolution: {integrity: sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw==}
     engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
@@ -1823,6 +1836,16 @@ packages:
   picomatch@4.0.7:
     resolution: {integrity: sha512-qcJu88Q2IWqJsDD529JKMdwGm/dvInW4HvQnRwiH9JtihJvzGOscDtHE3x1pBKeUOTysQ8kVmLnJ2kJu7yhcGA==}
     engines: {node: '>=12'}
+
+  playwright-core@1.62.1:
+    resolution: {integrity: sha512-wPYSwEBJY9GHraISXqyqtx0na0LpO3XEX7jNDhntbex7tzUS7kLnZsOlFruFJB4Hi/rhDMjXGqHewDZ68nYZVw==}
+    engines: {node: '>=20'}
+    hasBin: true
+
+  playwright@1.62.1:
+    resolution: {integrity: sha512-0M+L3LAD8/nm554LOla9Ayx0j0tmFZ0FBcoQ7F1VuVHpM/XpiC8RcDzBQB8W5+hA8L22THxELzeF+2WcUzvcLg==}
+    engines: {node: '>=20'}
+    hasBin: true
 
   postcss@8.5.26:
     resolution: {integrity: sha512-u82N74LFzG8ca+dD8puPnplTXoGH4fTPpVGuIbt36G3qvNlkvfD0lEAZSxaly3KX8TS/L1A1gsCEmvKmBcVbkQ==}
@@ -2481,7 +2504,7 @@ snapshots:
       react: 19.2.8
       react-dom: 19.2.8(react@19.2.8)
 
-  '@feltdb/core@0.6.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
+  '@feltdb/core@0.6.2(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
     optionalDependencies:
       react: 19.2.8
       react-dom: 19.2.8(react@19.2.8)
@@ -2494,7 +2517,7 @@ snapshots:
       - react-dom
       - react-router-dom
 
-  '@feltdb/webllm@0.6.0':
+  '@feltdb/webllm@0.6.2':
     dependencies:
       '@mlc-ai/web-llm': 0.2.84
 
@@ -2610,6 +2633,10 @@ snapshots:
 
   '@pkgjs/parseargs@0.11.0':
     optional: true
+
+  '@playwright/test@1.62.1':
+    dependencies:
+      playwright: 1.62.1
 
   '@promptbook/utils@0.69.5':
     dependencies:
@@ -3531,6 +3558,9 @@ snapshots:
 
   fs.realpath@1.0.0: {}
 
+  fsevents@2.3.2:
+    optional: true
+
   fsevents@2.3.3:
     optional: true
 
@@ -3969,6 +3999,14 @@ snapshots:
   picomatch@2.3.2: {}
 
   picomatch@4.0.7: {}
+
+  playwright-core@1.62.1: {}
+
+  playwright@1.62.1:
+    dependencies:
+      playwright-core: 1.62.1
+    optionalDependencies:
+      fsevents: 2.3.2
 
   postcss@8.5.26:
     dependencies:

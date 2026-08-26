@@ -18,6 +18,19 @@ type RuntimeMessage = {
   [key: string]: unknown
 }
 
+type CapturedEvent = {
+  ts: number
+  [key: string]: unknown
+}
+
+function capturedEvents(value: unknown): CapturedEvent[] {
+  return Array.isArray(value)
+    ? value.filter((event): event is CapturedEvent =>
+        typeof event === 'object' && event !== null && typeof (event as { ts?: unknown }).ts === 'number'
+      )
+    : []
+}
+
 const eventQueues = new Map<number, Promise<void>>()
 const RETENTION_MS = 24 * 60 * 60 * 1000
 
@@ -130,10 +143,11 @@ chrome.runtime.onMessage.addListener(
       const next = previous
         .then(() => chrome.storage.session.get(key))
         .then((stored) => {
-          const events = Array.isArray(stored[key]) ? stored[key] : []
+          const events = capturedEvents(stored[key])
           const cutoff = Date.now() - RETENTION_MS
+          const payload = message.payload
           return chrome.storage.session.set({
-            [key]: [...events.filter((event: any) => event.ts >= cutoff), message.payload].slice(-500),
+            [key]: [...events.filter((event) => event.ts >= cutoff), payload].slice(-500),
           })
         })
         .then(() => sendResponse({ ok: true }))
@@ -157,7 +171,7 @@ chrome.runtime.onMessage.addListener(
       const key = `events:${tabId}`
       void chrome.storage.session.get(key).then((stored: any) => {
         const cutoff = Date.now() - RETENTION_MS
-        const events = (Array.isArray(stored[key]) ? stored[key] : []).filter((event: any) => event.ts >= cutoff)
+        const events = capturedEvents(stored[key]).filter((event) => event.ts >= cutoff)
         void chrome.storage.session.set({ [key]: events })
         sendResponse({ events })
       })
