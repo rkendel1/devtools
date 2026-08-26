@@ -18,6 +18,19 @@ type RuntimeMessage = {
   [key: string]: unknown
 }
 
+type CapturedEvent = {
+  ts: number
+  [key: string]: unknown
+}
+
+function capturedEvents(value: unknown): CapturedEvent[] {
+  return Array.isArray(value)
+    ? value.filter((event): event is CapturedEvent =>
+        typeof event === 'object' && event !== null && typeof (event as { ts?: unknown }).ts === 'number'
+      )
+    : []
+}
+
 const eventQueues = new Map<number, Promise<void>>()
 const RETENTION_MS = 24 * 60 * 60 * 1000
 
@@ -124,24 +137,26 @@ chrome.runtime.onMessage.addListener(
 
     // Event capture and storage
     if (message?.type === 'runtime-investigator:event' && sender.tab?.id != null) {
-      const key = `events:${sender.tab.id}`
-      const previous = eventQueues.get(sender.tab.id) ?? Promise.resolve()
+      const tabId = sender.tab.id
+      const key = `events:${tabId}`
+      const previous = eventQueues.get(tabId) ?? Promise.resolve()
       const next = previous
         .then(() => chrome.storage.session.get(key))
         .then((stored) => {
-          const events = Array.isArray(stored[key]) ? stored[key] : []
+          const events = capturedEvents(stored[key])
           const cutoff = Date.now() - RETENTION_MS
+          const payload = message.payload
           return chrome.storage.session.set({
-            [key]: [...events.filter((event) => event.ts >= cutoff), message.payload].slice(-500),
+            [key]: [...events.filter((event) => event.ts >= cutoff), payload].slice(-500),
           })
         })
         .then(() => sendResponse({ ok: true }))
 
       const queued = next.finally(() => {
-        if (eventQueues.get(sender.tab.id) === queued) eventQueues.delete(sender.tab.id)
+        if (eventQueues.get(tabId) === queued) eventQueues.delete(tabId)
       })
 
-      eventQueues.set(sender.tab.id, queued)
+      eventQueues.set(tabId, queued)
       return true
     }
 
@@ -156,7 +171,7 @@ chrome.runtime.onMessage.addListener(
       const key = `events:${tabId}`
       void chrome.storage.session.get(key).then((stored) => {
         const cutoff = Date.now() - RETENTION_MS
-        const events = (stored[key] ?? []).filter((event) => event.ts >= cutoff)
+        const events = capturedEvents(stored[key]).filter((event) => event.ts >= cutoff)
         void chrome.storage.session.set({ [key]: events })
         sendResponse({ events })
       })
