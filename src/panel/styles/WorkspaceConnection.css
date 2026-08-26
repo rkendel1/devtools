@@ -1,0 +1,254 @@
+.workspace-connection {
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+  background: #fafafa;
+}
+
+.workspace-connection.dark {
+  border-color: #333;
+  background: #1a1a1a;
+}
+
+.connection-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  gap: 12px;
+}
+
+.connection-header h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #333;
+}
+
+.workspace-connection.dark .connection-header h2 {
+  color: #fff;
+}
+
+.connection-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.connection-status.connected {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.connection-status.disconnected {
+  background: #ffebee;
+  color: #c62828;
+}
+
+.workspace-connection.dark .connection-status.connected {
+  background: #1b5e20;
+  color: #81c784;
+}
+
+.workspace-connection.dark .connection-status.disconnected {
+  background: #b71c1c;
+  color: #ef5350;
+}
+
+.status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.connection-info {
+  background: #fff;
+  border-radius: 4px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.workspace-connection.dark .connection-info {
+  background: #262626;
+}
+
+.info-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.info-item label {
+  font-size: 12px;
+  font-weight: 500;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.workspace-connection.dark .info-item label {
+  color: #999;
+}
+
+.info-item code {
+  font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+  font-size: 13px;
+  padding: 8px;
+  background: #f5f5f5;
+  border-radius: 4px;
+  color: #333;
+  word-break: break-all;
+}
+
+.workspace-connection.dark .info-item code {
+  background: #1a1a1a;
+  color: #fff;
+}
+
+.connection-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.form-group label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #333;
+}
+
+.workspace-connection.dark .form-group label {
+  color: #fff;
+}
+
+.form-group input {
+  padding: 10px 12px;
+  border: 1px solid #d0d0d0;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: inherit;
+  background: #fff;
+  color: #333;
+}
+
+.workspace-connection.dark .form-group input {
+  border-color: #444;
+  background: #262626;
+  color: #fff;
+}
+
+.form-group input:focus {
+  outline: none;
+  border-color: #2196f3;
+  box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.1);
+}
+
+.form-group input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.hint {
+  font-size: 12px;
+  color: #999;
+  margin-top: 4px;
+}
+
+.hint code {
+  font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+  background: #f5f5f5;
+  padding: 2px 6px;
+  border-radius: 3px;
+  color: #333;
+}
+
+.workspace-connection.dark .hint code {
+  background: #1a1a1a;
+  color: #fff;
+}
+
+.error-message {
+  padding: 10px 12px;
+  background: #ffebee;
+  border: 1px solid #ffcdd2;
+  border-radius: 4px;
+  color: #c62828;
+  font-size: 12px;
+}
+
+.workspace-connection.dark .error-message {
+  background: #b71c1c;
+  border-color: #d32f2f;
+  color: #ff8a80;
+}
+
+.connect-button,
+.disconnect-button {
+  padding: 10px 16px;
+  border: none;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.connect-button {
+  background: #2196f3;
+  color: #fff;
+}
+
+.connect-button:hover:not(:disabled) {
+  background: #1976d2;
+  box-shadow: 0 2px 4px rgba(33, 150, 243, 0.3);
+}
+
+.connect-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.disconnect-button {
+  background: transparent;
+  color: #d32f2f;
+  border: 1px solid #d32f2f;
+}
+
+.disconnect-button:hover {
+  background: #ffebee;
+}
+
+.workspace-connection.dark .disconnect-button:hover {
+  background: #b71c1c;
+}
+
+.connection-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}

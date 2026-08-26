@@ -17,6 +17,7 @@ import { useMaintenance } from './hooks/useMaintenance'
 import { useScreenshots } from './hooks/useScreenshots'
 import { ScreenshotGallery } from './components/ScreenshotGallery'
 import { InvestigationDetails } from './components/InvestigationDetails'
+import { WorkspaceConnection } from './components/WorkspaceConnection'
 
 type ExportFormat = 'text' | 'markdown' | 'jira' | 'json'
 type Filters = { query: string; status: string; domain: string; type: string; timeframe: string }
@@ -48,6 +49,10 @@ export default function App() {
   const [aiLoading, setAiLoading] = useState(false)
   const [aiQuestion, setAiQuestion] = useState('')
   const [aiAnswer, setAiAnswer] = useState('')
+  const [workspaceConnected, setWorkspaceConnected] = useState(false)
+  const [workspaceId, setWorkspaceId] = useState<string>('')
+  const [workspaceError, setWorkspaceError] = useState<string>('')
+  const [workspaceLoading, setWorkspaceLoading] = useState(false)
   const lastRuntimeEvent = useRef(0)
 
   const { screenshots, setScreenshots, recordingScreens, setRecordingScreens, captureFrame, copyScreenshot } = useScreenshots(setMessage)
@@ -92,6 +97,33 @@ export default function App() {
     chrome.runtime.onMessage.addListener(listener)
     return () => chrome.runtime.onMessage.removeListener(listener)
   }, [])
+
+  const handleWorkspaceConnect = async (pairingCode: string) => {
+    setWorkspaceLoading(true)
+    setWorkspaceError('')
+
+    try {
+      // Send bootstrap message to extension background script
+      const response = await chrome.runtime.sendMessage({
+        type: 'feltdb:test-bootstrap',
+        pairingCode: pairingCode,
+      })
+
+      if (response?.connected) {
+        setWorkspaceConnected(true)
+        setWorkspaceId(response.workspaceId || '')
+        setMessage(`Connected to workspace: ${response.workspaceId}`)
+      } else {
+        throw new Error(response?.error || 'Failed to connect to workspace')
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to connect to workspace'
+      setWorkspaceError(errorMessage)
+      setMessage(`Workspace connection failed: ${errorMessage}`)
+    } finally {
+      setWorkspaceLoading(false)
+    }
+  }
 
   const selectedRequest = requests.find((request) => request.id === selectedRequestId) ?? null
   const domains = useMemo(() => [...new Set(requests.flatMap((request) => {
@@ -267,6 +299,14 @@ export default function App() {
 
         {!hasChromeDevtools() && <p className="badge warn">Open this page inside the Chrome DevTools Investigate panel.</p>}
         {!contextValid && <div className="context-invalid"><strong>Extension was reloaded.</strong> This DevTools panel is stale, so its buttons cannot contact the extension. Close DevTools completely and reopen it.</div>}
+
+        <WorkspaceConnection
+          onConnect={handleWorkspaceConnect}
+          isConnected={workspaceConnected}
+          workspaceId={workspaceId}
+          error={workspaceError}
+          loading={workspaceLoading}
+        />
 
         {showPrivacy && <section className="settings">
           <h3>Privacy and bundle settings</h3>

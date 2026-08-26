@@ -106,7 +106,7 @@ chrome.runtime.onInstalled.addListener(() => {
 })
 
 chrome.runtime.onMessage.addListener(
-  (message: RuntimeMessage, sender, sendResponse: (response: any) => void) => {
+  (message: RuntimeMessage, sender: chrome.runtime.MessageSender, sendResponse: (response: any) => void) => {
     // Health check
     if (message?.type === 'runtime-investigator:health') {
       sendResponse({ ok: true })
@@ -169,7 +169,7 @@ chrome.runtime.onMessage.addListener(
       }
 
       const key = `events:${tabId}`
-      void chrome.storage.session.get(key).then((stored) => {
+      void chrome.storage.session.get(key).then((stored: any) => {
         const cutoff = Date.now() - RETENTION_MS
         const events = capturedEvents(stored[key]).filter((event) => event.ts >= cutoff)
         void chrome.storage.session.set({ [key]: events })
