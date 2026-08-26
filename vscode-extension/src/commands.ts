@@ -41,12 +41,13 @@ export function registerCommands(context: vscode.ExtensionContext, client: FeltW
     const item = resolveItem(value, provider)
     if (!item) return void vscode.window.showWarningMessage('Select a runtime investigation first.')
     const location = sourceLocation(item.envelope.investigation)
-    if (!location) return void showResolutionError('(no runtime source path)')
-    const uri = await resolveSourceUri(location.source)
-    if (!uri) return void showResolutionError(location.source)
+    const requestSource = location ? undefined : await resolveRequestedSource(item.envelope.investigation.graph.request.url)
+    if (!location && !requestSource) return void vscode.window.showWarningMessage('Source location unavailable\nThe runtime investigation did not identify an exact local source file.', { modal: true })
+    const uri = requestSource ?? await resolveSourceUri(location!.source)
+    if (!uri) return void showResolutionError(location!.source)
     const document = await vscode.workspace.openTextDocument(uri)
     const editor = await vscode.window.showTextDocument(document)
-    const line = Math.max(0, Math.min(document.lineCount - 1, location.line - 1))
+    const line = Math.max(0, Math.min(document.lineCount - 1, (location?.line ?? 1) - 1))
     editor.selection = new vscode.Selection(line, 0, line, 0)
     editor.revealRange(new vscode.Range(line, 0, line, 0), vscode.TextEditorRevealType.InCenter)
   })
@@ -65,13 +66,39 @@ export function registerCommands(context: vscode.ExtensionContext, client: FeltW
     provider.updated(item)
     const prompt = agentPrompt(item)
     const available = await vscode.commands.getCommands(true)
-    if (!available.includes('workbench.action.chat.open')) {
-      await vscode.env.clipboard.writeText(prompt)
-      return void vscode.window.showWarningMessage('No VS Code chat agent is available. The investigation context was copied to the clipboard.')
+    if (available.includes('workbench.action.chat.open')) {
+      try {
+        // The unified chat command preserves the active session's selected agent
+        // (Claude, Copilot, Codex, or another registered provider). Do not call
+        // openagent here: that command creates a built-in/Copilot-biased session.
+        await vscode.commands.executeCommand('workbench.action.chat.open', {
+          query: prompt,
+          isPartialQuery: false,
+          focus: true,
+        })
+        return
+      } catch { /* Fall through to an explicit, provider-neutral handoff. */ }
     }
-    await vscode.commands.executeCommand('workbench.action.chat.open', { query: prompt, mode: 'agent' })
+    await handoffThroughAgentPicker(prompt, available)
   })
   return [connect, disconnect, reconnect, refresh, open, showSource, trace, compare, investigate]
+}
+
+async function handoffThroughAgentPicker(prompt: string, availableCommands: string[]): Promise<void> {
+  await vscode.env.clipboard.writeText(prompt)
+  const choice = await vscode.window.showWarningMessage(
+    'VS Code could not send this investigation to the active agent. The complete task was copied to the clipboard.',
+    'Choose Agent',
+  )
+  if (choice !== 'Choose Agent') return
+  if (availableCommands.includes('workbench.action.openAgentsWindow')) {
+    await vscode.commands.executeCommand('workbench.action.openAgentsWindow')
+    return
+  }
+  if (availableCommands.includes('workbench.action.chat.openModePicker') && availableCommands.includes('workbench.action.chat.open')) {
+    await vscode.commands.executeCommand('workbench.action.chat.open')
+    await vscode.commands.executeCommand('workbench.action.chat.openModePicker')
+  }
 }
 
 export async function restoreWorkspace(context: vscode.ExtensionContext, client: FeltWorkspaceClient, provider: InvestigationProvider): Promise<void> {
@@ -82,7 +109,7 @@ export async function restoreWorkspace(context: vscode.ExtensionContext, client:
 
 function validatePairingCode(value: string): string | undefined {
   if (!value.trim()) return 'Pairing code is required.'
-  if (!/^FELT-[A-Z0-9]{6}$/i.test(value.trim())) return 'Invalid FeltDB pairing code. Expected format: FELT-XXXXXX'
+  if (!/^FELT-[A-Z0-9]{6}$/i.test(value.trim())) return 'Invalid FeltDB pairing code.\nExpected format:\nFELT-XXXXXX'
   return undefined
 }
 
@@ -97,6 +124,7 @@ async function connectWithCode(pairingCode: string, context: vscode.ExtensionCon
     await vscode.commands.executeCommand('setContext', 'feltdb.connected', true)
     if (showErrors) void vscode.window.showInformationMessage(`Connected to FeltDB workspace ${client.workspaceId}`)
   } catch (error) {
+    try { await client.disconnect() } catch { /* Preserve the original connection error. */ }
     await vscode.commands.executeCommand('setContext', 'feltdb.connected', false)
     if (showErrors) await vscode.window.showErrorMessage(connectionError(pairingCode, error), { modal: true })
   }
@@ -132,6 +160,16 @@ async function resolveSourceUri(source: string): Promise<vscode.Uri | undefined>
   return undefined
 }
 
+async function resolveRequestedSource(requestUrl: string): Promise<vscode.Uri | undefined> {
+  let pathname: string
+  try { pathname = decodeURIComponent(new URL(requestUrl).pathname) } catch { return undefined }
+  // A request URL is only a source location when it names a source file and that
+  // exact path exists locally. Endpoint paths such as /api/telemetry never qualify.
+  if (!/\.(?:[cm]?[jt]sx?|vue|svelte|astro|css|scss|less|html)$/i.test(pathname)) return undefined
+  if (pathname.startsWith('/@fs/')) return existing(vscode.Uri.file(pathname.slice('/@fs'.length)))
+  return resolveSourceUri(pathname)
+}
+
 async function existing(uri: vscode.Uri): Promise<vscode.Uri | undefined> {
   try { await vscode.workspace.fs.stat(uri); return uri } catch { return undefined }
 }
@@ -146,42 +184,75 @@ function agentPrompt(item: InvestigationItem): string {
   const request = value.graph.request
   const environment = value.graph.bundle?.environment
   const location = sourceLocation(value)
-  return `You are investigating a runtime observation from a FeltDB development workspace.
+  const duration = request.timingMs ?? durationFromTrace(value.graph.trace ?? [])
+  return `Runtime Investigation
 
-Do not edit files. Initially respond only with analysis and proposed next steps. Do not assume the reported diagnosis is correct; determine whether the observed behavior actually represents a defect.
-
-IDENTITY
-FeltDB entity ID: ${item.entityId}
-Investigation ID: ${value.id}
-Workspace ID: ${item.envelope.workspaceId}
-
-OBSERVED RUNTIME EVIDENCE
+Entity:
+${item.entityId}
+Investigation:
+${value.id}
+Workspace:
+${item.envelope.workspaceId}
 Request:
 ${request.method} ${request.url}
 Status:
-${request.status} ${value.graph.response?.statusText ?? ''}
+${request.status}${value.graph.response?.statusText ? ` ${value.graph.response.statusText}` : ''}
+Duration:
+${duration == null ? 'Not recorded' : `${duration}ms`}
+Runtime observations:
+${formatLines(value.graph.anomalies ?? [])}
+Possible causes recorded by the runtime investigator:
+${formatLines(value.result.alternatives ?? [])}
 Page:
 ${environment?.pageUrl ?? 'Unknown'}
-Environment:
-Browser: ${browserName(environment?.userAgent)}
-Viewport: ${environment?.viewport ?? 'Unknown'}
-Trace:
-${formatLines((value.graph.trace ?? []).map((step) => step.label))}
-Evidence:
+Browser:
+${browserName(environment?.userAgent)}
+Viewport:
+${environment?.viewport ?? 'Unknown'}
+Observed evidence:
 ${formatLines(value.result.evidence)}
+Persisted request trace:
+${formatLines((value.graph.trace ?? []).map((step) => `${step.label}${step.source ? ` (${step.source}:${step.line ?? 1})` : ''}`))}
+Related runtime events:
+${formatLines((value.graph.relatedEvents ?? []).map((event) => `${event.type}: ${event.message}${event.source ? ` (${event.source}:${event.line ?? 1})` : ''}`))}
 Reproduction:
 ${formatLines(value.graph.bundle?.reproductionSteps ?? [])}
 Relevant source:
-${location?.source ?? 'Unknown'}${location ? `:${location.line}` : ''}
+${location ? `${location.source}:${location.line}` : 'No exact source location was persisted.'}
+Comparison with previous successful observation:
+${formatComparison(value.graph.comparison)}
+Persisted request headers:
+${formatValue(value.graph.bundle?.requestHeaders)}
+Persisted response headers:
+${formatValue(value.graph.bundle?.responseHeaders)}
+Persisted request body:
+${formatValue(value.graph.bundle?.requestBody)}
+Persisted response body:
+${formatValue(value.graph.bundle?.responseBody)}
+Redaction applied:
+${value.graph.redactionApplied ? 'Yes' : 'No'}
 
-AI-GENERATED DIAGNOSIS
-Reported diagnosis:
+AI-generated diagnosis:
 ${value.result.diagnosis}
 Confidence:
 ${Math.round(value.result.confidence * 100)}%
-Alternatives:
-${formatLines(value.result.alternatives ?? [])}`
+Suggested next actions from the runtime investigator:
+${formatLines(value.result.nextActions)}
+
+IMPORTANT:
+The diagnosis is an inference, not an established fact. Determine the actual cause from the available evidence and source.
+
+Your job:
+Investigate this runtime observation. Determine whether it represents an actual defect, identify the most likely root cause, inspect the relevant source, and propose a fix. Do not modify files yet.
+
+Respond with these sections: Finding, Evidence, Relevant source, Recommended change, and Confidence.`
 }
 
 function formatLines(lines: string[]): string { return lines.length ? lines.map((line) => `- ${line}`).join('\n') : '- None recorded' }
 function browserName(userAgent?: string): string { return userAgent?.match(/(?:Chrome|Firefox|Version)\/[\d.]+/)?.[0] ?? userAgent ?? 'Unknown' }
+function durationFromTrace(trace: Array<{ label: string }>): number | undefined { for (const step of trace) { const match = step.label.match(/(?:—|-|in)\s*(\d+(?:\.\d+)?)ms/i); if (match?.[1]) return Number(match[1]) } return undefined }
+function formatValue(value: unknown): string { return value == null || value === '' ? 'Not recorded' : typeof value === 'string' ? value : JSON.stringify(value, null, 2) }
+function formatComparison(comparison: RuntimeInvestigation['graph']['comparison']): string {
+  if (!comparison?.previousSuccess && !comparison?.semanticDiff?.length) return 'No comparable successful observation is available.'
+  return `Previous successful data:\n${formatValue(comparison.previousSuccess)}\nCurrent data:\n${formatValue(comparison.current)}\nDifferences:\n${formatLines(comparison.semanticDiff ?? [])}`
+}

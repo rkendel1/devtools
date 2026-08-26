@@ -19,8 +19,7 @@ export class InvestigationView {
 
   static showComparison(extensionUri: vscode.Uri, item: InvestigationItem): void {
     const panel = createPanel('feltdb.comparison', 'Runtime Comparison', extensionUri)
-    const differences = item.envelope.investigation.graph.comparison?.semanticDiff
-    const body = differences?.length ? `<h2>Changes from previous successful observation</h2>${list(differences)}` : '<p>No previous comparable observation is available.</p>'
+    const body = renderComparison(item.envelope.investigation)
     panel.webview.html = documentHtml(panel.webview, 'Comparison', body)
   }
 }
@@ -53,12 +52,22 @@ function renderTrace(value: RuntimeInvestigation): string {
   const request = value.graph.request
   const duration = request.timingMs ?? durationFromTrace(value)
   const persisted = value.graph.trace ?? []
-  if (persisted.length) return `<ol>${persisted.map((step) => `<li><strong>${escape(step.label)}</strong>${step.source ? `<br><code>${escape(step.source)}:${step.line ?? 1}</code>` : ''}</li>`).join('')}</ol>`
-  return `<ol><li>Request started</li><li><strong>${escape(request.method)} ${escape(requestPath(request.url))}</strong>${duration == null ? '' : `<br>Duration: ${duration}ms`}</li><li><strong>Response</strong><br>${request.status} ${escape(value.graph.response?.statusText ?? '')}</li></ol>`
+  const heading = `<h2>${escape(request.method)} ${escape(request.url)}</h2>${duration == null ? '' : `<p class="duration">${duration}ms</p>`}`
+  if (!persisted.length) return `${heading}<p>No persisted request trace is available.</p>`
+  return `${heading}<ol>${persisted.map((step) => `<li><strong>${escape(step.label)}</strong>${step.source ? `<br><code>${escape(step.source)}:${step.line ?? 1}</code>` : ''}</li>`).join('')}</ol>`
 }
 
+function renderComparison(value: RuntimeInvestigation): string {
+  const comparison = value.graph.comparison
+  if (!comparison?.previousSuccess && !comparison?.semanticDiff?.length) return '<p>No comparable successful observation is available.</p>'
+  const request = value.graph.request
+  return `<h2>Previous observation</h2><p>Successful observation data captured by FeltDB</p>${data(comparison.previousSuccess)}<hr><h2>Current observation</h2><p><strong>${escape(request.method)} ${escape(request.url)}</strong><br>Status ${request.status} ${escape(value.graph.response?.statusText ?? '')}</p>${data(comparison.current)}<hr><h2>Difference</h2>${comparison.semanticDiff?.length ? list(comparison.semanticDiff.map((difference) => `⚠ ${difference}`)) : '<p>No persisted semantic differences.</p>'}`
+}
+
+function data(value: unknown): string { return value == null ? '<p>No payload data persisted.</p>' : `<pre>${escape(JSON.stringify(value, null, 2))}</pre>` }
+
 function documentHtml(webview: vscode.Webview, title: string, body: string): string { return `<!doctype html><html><head>${head(webview)}</head><body><h1>${escape(title)}</h1><section class="section">${body}</section></body></html>` }
-function head(webview: vscode.Webview, nonce?: string): string { return `<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline';${nonce ? ` script-src 'nonce-${nonce}';` : ''}"><style>body{font-family:var(--vscode-font-family);padding:24px;max-width:900px;color:var(--vscode-foreground)}h1{margin-bottom:4px}.hero,.section{border:1px solid var(--vscode-panel-border);border-radius:8px;padding:16px;margin:14px 0}.grid{display:grid;grid-template-columns:140px 1fr;gap:8px}.label,.identity{color:var(--vscode-descriptionForeground)}li{margin:9px 0}.actionbar{display:flex;gap:8px;flex-wrap:wrap;margin:20px 0}button{padding:7px 12px;color:var(--vscode-button-foreground);background:var(--vscode-button-background);border:0;border-radius:3px}code,pre{white-space:pre-wrap;overflow-wrap:anywhere}</style>` }
+function head(webview: vscode.Webview, nonce?: string): string { return `<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline';${nonce ? ` script-src 'nonce-${nonce}';` : ''}"><style>body{font-family:var(--vscode-font-family);padding:24px;max-width:900px;color:var(--vscode-foreground)}h1{margin-bottom:4px}.hero,.section{border:1px solid var(--vscode-panel-border);border-radius:8px;padding:16px;margin:14px 0}.grid{display:grid;grid-template-columns:140px 1fr;gap:8px}.label,.identity,.duration{color:var(--vscode-descriptionForeground)}li{margin:9px 0}.actionbar{display:flex;gap:8px;flex-wrap:wrap;margin:20px 0}button{padding:7px 12px;color:var(--vscode-button-foreground);background:var(--vscode-button-background);border:0;border-radius:3px}hr{border:0;border-top:1px solid var(--vscode-panel-border);margin:24px 0}code,pre{white-space:pre-wrap;overflow-wrap:anywhere}</style>` }
 function hasObservedFailure(value: RuntimeInvestigation): boolean { return value.graph.request.status >= 400 || (value.graph.relatedEvents ?? []).some((event) => event.type.includes('error')) }
 function durationFromTrace(value: RuntimeInvestigation): number | undefined { for (const step of value.graph.trace ?? []) { const match = step.label.match(/(?:—|-|in)\s*(\d+(?:\.\d+)?)ms/i); if (match?.[1]) return Number(match[1]) } return undefined }
 function requestPath(url: string): string { try { return new URL(url).pathname || url } catch { return url } }
@@ -72,5 +81,5 @@ export function sourceLocation(value: RuntimeInvestigation): { source: string; l
   if (direct?.source) return { source: direct.source, line: direct.line ?? 1 }
   const trace = value.graph.trace?.find((step) => step.source)
   if (trace?.source) return { source: trace.source, line: trace.line ?? 1 }
-  try { const url = new URL(value.graph.request.url); return url.pathname ? { source: decodeURIComponent(url.pathname), line: 1 } : undefined } catch { return undefined }
+  return undefined
 }

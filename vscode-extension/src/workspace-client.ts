@@ -18,6 +18,7 @@ export interface RuntimeInvestigation {
     trace?: Array<{ label: string; source?: string; line?: number }>
     redactionApplied?: boolean
     comparison?: { semanticDiff?: string[]; previousSuccess?: unknown; current?: unknown }
+    anomalies?: string[]
     relatedEvents?: Array<{ type: string; message: string; source?: string; line?: number }>
     bundle?: { environment?: RuntimeEnvironment; requestHeaders?: unknown; responseHeaders?: unknown; requestBody?: string; responseBody?: string; reproductionSteps?: string[] }
   }
@@ -29,7 +30,7 @@ export interface RuntimeInvestigationEnvelope {
   schemaVersion: number
   workspaceId: string
   entityId?: string
-  lifecycle: 'NEW' | 'INVESTIGATING'
+  lifecycle: 'NEW' | 'INVESTIGATING' | 'PROPOSED' | 'APPLIED' | 'VERIFYING' | 'RESOLVED'
   sentAt: number
   source: { clientId: string; clientType: string; product: string }
   investigation: RuntimeInvestigation
@@ -58,12 +59,21 @@ export class FeltWorkspaceClient implements vscode.Disposable {
   async connect(pairingCode: string, projectDir?: string): Promise<void> {
     await this.disconnect()
     const { connectDevelopmentWorkspace } = await import('@feltdb/core/workspace')
-    const connection = await connectDevelopmentWorkspace({
+    const options = {
       pairingCode: pairingCode,
       clientId: `vscode-${vscode.env.machineId.slice(0, 12)}`,
-      clientType: 'ide',
+      clientType: 'ide' as const,
       projectDir,
-    })
+    }
+    let connection: DevelopmentWorkspaceConnection
+    try {
+      connection = await connectDevelopmentWorkspace(options)
+    } catch (error) {
+      // An open folder is a useful local hint, not a requirement. If the code did
+      // not belong to that folder, let core resolve it through pairing discovery.
+      if (!projectDir || !/not found|expired/i.test(error instanceof Error ? error.message : String(error))) throw error
+      connection = await connectDevelopmentWorkspace({ ...options, projectDir: undefined })
+    }
     this.connection = connection
     this.currentPairingCode = pairingCode
     this.unsubscribe = connection.subscribe<RuntimeInvestigationEnvelope>(COLLECTION, (event) => {
@@ -84,7 +94,6 @@ export class FeltWorkspaceClient implements vscode.Disposable {
 
   async markInvestigating(item: InvestigationItem): Promise<void> {
     if (!this.connection) throw new Error('Connect to a FeltDB development workspace first.')
-    if (!item.envelope.entityId) throw new Error('This legacy investigation does not contain its durable FeltDB entity ID.')
     await this.connection.update<RuntimeInvestigationEnvelope>(COLLECTION, item.entityId, { lifecycle: 'INVESTIGATING' })
     item.envelope.lifecycle = 'INVESTIGATING'
   }
