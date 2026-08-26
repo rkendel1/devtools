@@ -200,10 +200,62 @@ export function createCodeChangeId(): string {
   return `change:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`
 }
 
+export function createSelectionId(): string {
+  return `selection:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`
+}
+
+export function createSelectionTaskId(): string {
+  return `selection_task:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`
+}
+
 export function createVerificationRunId(): string {
   return `verify:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`
 }
 
 export function createVerificationResultId(): string {
   return `result:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`
+}
+
+export interface VisualSelection {
+  id: string
+  workspaceId: string
+  kind: 'visual_selection'
+  url: string
+  selector: string
+  elementRole?: string
+  textContent: string
+  boundingBox: {
+    x: number
+    y: number
+    width: number
+    height: number
+  }
+  domPath: string
+  nearbyElements: Array<{
+    selector: string
+    text: string
+  }>
+  sourceHints?: Array<{
+    file: string
+    line?: number
+  }>
+  capturedAt: number
+  properties: {
+    investigationId?: string
+    context?: Record<string, unknown>
+  }
+}
+
+export interface SelectionTask {
+  id: string
+  workspaceId: string
+  kind: 'selection_task'
+  selectionId: string
+  userInstruction: string
+  taskType: 'UI_CHANGE' | 'DEBUG_QUESTION' | 'CONTENT_CHANGE'
+  createdAt: number
+  status: 'open' | 'in_progress' | 'completed' | 'failed'
+  properties: {
+    context?: Record<string, unknown>
+  }
 }
