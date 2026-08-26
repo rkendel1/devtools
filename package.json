@@ -11,6 +11,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:e2e:chrome": "pnpm run build && node e2e/chrome-real.mjs",
+    "test:e2e:pairing": "pnpm run build && node e2e/chrome-pairing-real.mjs",
     "test:e2e:firefox": "pnpm run build && node e2e/firefox-real.mjs",
     "test:e2e:firefox:headed": "pnpm run build && HEADED=1 node e2e/firefox-real.mjs",
     "test:e2e:webkit": "pnpm run build && node e2e/webkit-real.mjs",
@@ -20,9 +21,9 @@
     "demo": "node --loader ts-node/esm demo/demo.ts"
   },
   "dependencies": {
-    "@feltdb/core": "^0.6.2",
+    "@feltdb/core": "^0.6.6",
     "@feltdb/development-runtime": "file:./packages/development-runtime",
-    "@feltdb/webllm": "^0.6.2",
+    "@feltdb/webllm": "^0.6.6",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },

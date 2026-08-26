@@ -23,13 +23,13 @@ export function WorkspaceConnection({
     e.preventDefault()
     setLocalError('')
 
-    if (!pairingCode.trim()) {
-      setLocalError('Please enter a pairing code')
+    if (!/^FELT-[A-Z0-9]{6}$/i.test(pairingCode.trim())) {
+      setLocalError('Enter a pairing code in the format FELT-XXXXXX')
       return
     }
 
     try {
-      await onConnect(pairingCode.trim())
+      await onConnect(pairingCode.trim().toUpperCase())
       setPairingCode('')
     } catch (err) {
       setLocalError(err instanceof Error ? err.message : 'Connection failed')
@@ -39,7 +39,7 @@ export function WorkspaceConnection({
   return (
     <div className="workspace-connection">
       <div className="connection-header">
-        <h2>FeltDB Workspace</h2>
+        <h2>Development Workspace</h2>
         <div className={`connection-status ${isConnected ? 'connected' : 'disconnected'}`}>
           <span className="status-dot"></span>
           {isConnected ? 'Connected' : 'Not Connected'}
@@ -58,11 +58,11 @@ export function WorkspaceConnection({
       {!isConnected && (
         <form onSubmit={handleSubmit} className="connection-form">
           <div className="form-group">
-            <label htmlFor="pairing-code">Pairing Code</label>
+            <label htmlFor="pairing-code">Enter pairing code</label>
             <input
               id="pairing-code"
               type="text"
-              placeholder="Enter pairing code (e.g., FELT-C7C452)"
+              placeholder="FELT-XXXXXX"
               value={pairingCode}
               onChange={(e) => {
                 setPairingCode(e.target.value.toUpperCase())
@@ -72,7 +72,7 @@ export function WorkspaceConnection({
               autoFocus
             />
             <small className="hint">
-              Start a FeltDB dev server with: <code>npx @feltdb/core@0.6.1 dev</code>
+              Start the FeltDB development server, then enter its <strong>Pairing Code</strong>.
             </small>
           </div>
 

@@ -58,7 +58,7 @@ async function startFeltDBServer() {
   log('Starting FeltDB dev server...')
 
   return new Promise((resolve, reject) => {
-    const feltdb = spawn('npx', ['@feltdb/core@0.6.1', 'dev'], {
+    const feltdb = spawn('npx', ['--package=@feltdb/core@0.6.4', 'feltdb', 'dev', '--no-open'], {
       stdio: ['ignore', 'pipe', 'pipe'],
       cwd: root,
     })
@@ -68,7 +68,7 @@ async function startFeltDBServer() {
     const lines = createInterface({ input: feltdb.stdout })
 
     lines.on('line', (line) => {
-      if (line.includes('Workspace ID:')) {
+      if (line.includes('Workspace:')) {
         workspaceId = line.match(/ws_\w+/)?.[0]
       }
       if (line.includes('Pairing Code:')) {

@@ -11,7 +11,7 @@
   "permissions": ["storage", "scripting", "activeTab", "offscreen", "unlimitedStorage", "clipboardWrite"],
   "host_permissions": ["<all_urls>"],
   "content_security_policy": {
-    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; object-src 'self'; connect-src https:"
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; object-src 'self'; connect-src https: http://127.0.0.1:7700 http://127.0.0.1:7799"
   },
   "content_scripts": [
     {

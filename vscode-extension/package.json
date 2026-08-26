@@ -1,0 +1,52 @@
+{
+  "name": "feltdb-runtime-investigations",
+  "displayName": "FeltDB Runtime Investigations",
+  "description": "Receive durable browser runtime investigations from FeltDB workspaces.",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "engines": { "vscode": "^1.95.0" },
+  "categories": ["Other", "Debuggers"],
+  "activationEvents": ["onView:feltdb.runtimeInvestigations", "onCommand:feltdb.connectWorkspace", "onCommand:feltdb.disconnectWorkspace", "onCommand:feltdb.reconnectWorkspace"],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      { "command": "feltdb.connectWorkspace", "title": "FeltDB: Connect to Workspace" },
+      { "command": "feltdb.disconnectWorkspace", "title": "FeltDB: Disconnect" },
+      { "command": "feltdb.reconnectWorkspace", "title": "FeltDB: Reconnect" },
+      { "command": "feltdb.refreshInvestigations", "title": "FeltDB: Refresh Runtime Investigations" },
+      { "command": "feltdb.openInvestigation", "title": "FeltDB: Open Runtime Investigation" },
+      { "command": "feltdb.showSource", "title": "FeltDB: Show Investigation Source" },
+      { "command": "feltdb.viewTrace", "title": "FeltDB: View Request Trace" },
+      { "command": "feltdb.compareInvestigation", "title": "FeltDB: Compare Runtime Investigation" },
+      { "command": "feltdb.investigateRuntimeIssue", "title": "FeltDB: Investigate Runtime Issue" }
+    ],
+    "viewsContainers": {
+      "activitybar": [{ "id": "feltdb", "title": "FeltDB", "icon": "media/feltdb.svg" }]
+    },
+    "views": {
+      "feltdb": [{ "id": "feltdb.runtimeInvestigations", "name": "Runtime Investigations" }]
+    },
+    "menus": {
+      "view/title": [
+        { "command": "feltdb.connectWorkspace", "when": "view == feltdb.runtimeInvestigations && !feltdb.connected", "group": "navigation@1" },
+        { "command": "feltdb.reconnectWorkspace", "when": "view == feltdb.runtimeInvestigations && !feltdb.connected", "group": "navigation@2" },
+        { "command": "feltdb.disconnectWorkspace", "when": "view == feltdb.runtimeInvestigations && feltdb.connected", "group": "navigation@1" },
+        { "command": "feltdb.refreshInvestigations", "when": "view == feltdb.runtimeInvestigations && feltdb.connected", "group": "navigation@2" }
+      ],
+      "view/item/context": [
+        { "command": "feltdb.showSource", "when": "view == feltdb.runtimeInvestigations && viewItem == runtimeInvestigation", "group": "inline@1" },
+        { "command": "feltdb.investigateRuntimeIssue", "when": "view == feltdb.runtimeInvestigations && viewItem == runtimeInvestigation", "group": "inline@2" },
+        { "command": "feltdb.viewTrace", "when": "view == feltdb.runtimeInvestigations && viewItem == runtimeInvestigation", "group": "navigation@1" },
+        { "command": "feltdb.compareInvestigation", "when": "view == feltdb.runtimeInvestigations && viewItem == runtimeInvestigation", "group": "navigation@2" }
+      ]
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "package": "npx @vscode/vsce package"
+  },
+  "dependencies": { "@feltdb/core": "^0.6.5" },
+  "devDependencies": { "@types/node": "^24.13.3", "@types/vscode": "^1.95.0", "typescript": "~6.0.2" }
+}

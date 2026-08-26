@@ -106,10 +106,10 @@ export default function App() {
       // Send bootstrap message to extension background script
       const response = await chrome.runtime.sendMessage({
         type: 'feltdb:test-bootstrap',
-        pairingCode: pairingCode,
+        pairingCode,
       })
 
-      if (response?.connected) {
+      if (response?.ok) {
         setWorkspaceConnected(true)
         setWorkspaceId(response.workspaceId || '')
         setMessage(`Connected to workspace: ${response.workspaceId}`)
@@ -235,6 +235,16 @@ export default function App() {
     return result
   }
 
+  async function sendToIde(record: InvestigationRecord): Promise<{ entityId: string; workspaceId: string }> {
+    const response = await chrome.runtime.sendMessage({
+      type: 'runtime-investigator:send-to-ide',
+      investigation: record,
+    })
+    if (!response?.ok) throw new Error(response?.error || 'Failed to send investigation to IDE')
+    setMessage(`Sent investigation to IDE · ${response.entityId}`)
+    return { entityId: response.entityId, workspaceId: response.workspaceId }
+  }
+
   function exportDetails(): string {
     if (!investigation) return 'No investigation is selected.'
     const extension = exportFormat === 'json' ? 'json' : exportFormat === 'markdown' ? 'md' : 'txt'
@@ -345,7 +355,7 @@ export default function App() {
           clear={() => { setRecordingScreens(false); setScreenshots([]); setMessage('In-memory screenshots cleared.') }}
         />
 
-        {investigation ? <InvestigationDetails record={investigation} exportFormat={exportFormat} setExportFormat={setExportFormat} copyDetails={copyDetails} exportDetails={exportDetails} reinvestigate={() => {
+        {investigation ? <InvestigationDetails key={investigation.id} record={investigation} workspaceConnected={workspaceConnected} sendToIde={sendToIde} exportFormat={exportFormat} setExportFormat={setExportFormat} copyDetails={copyDetails} exportDetails={exportDetails} reinvestigate={() => {
           const request = requestsRef.current.find((item) => item.id === investigation.requestId)
           if (!request) return 'The original request has expired from live memory. Select a current request above to investigate it again.'
           void investigateRequest(request)

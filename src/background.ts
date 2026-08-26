@@ -7,13 +7,14 @@
  * - Message routing to content scripts and offscreen documents
  */
 
-import { connectDevelopmentWorkspace } from '@feltdb/core/workspace'
+import { connectDevelopmentWorkspace, resolvePairingCode } from '@feltdb/core/workspace'
 
 type RuntimeMessage = {
   type: string
   target?: string
   payload?: unknown
   pairingCode?: string
+  investigation?: unknown
   tabId?: number
   [key: string]: unknown
 }
@@ -70,17 +71,37 @@ async function ensureOffscreen() {
  * Handle FeltDB test bootstrap
  * Invoked by E2E test harness to connect extension to dev workspace
  */
-async function handleFeltDBBootstrap(message: RuntimeMessage): Promise<{ connected: boolean; workspaceId?: string }> {
-  if (!message.pairingCode) {
-    return { connected: false }
+type WorkspaceBootstrapResult =
+  | { ok: true; workspaceId: string; clientId: string; clientType: string }
+  | { ok: false; error: string }
+
+type InvestigationHandoffResult =
+  | { ok: true; entityId: string; workspaceId: string }
+  | { ok: false; error: string }
+
+function isPairingCode(value: unknown): value is string {
+  return typeof value === 'string' && /^FELT-[A-Z0-9]{6}$/i.test(value)
+}
+
+async function handleFeltDBBootstrap(message: RuntimeMessage): Promise<WorkspaceBootstrapResult> {
+  if (!isPairingCode(message.pairingCode)) {
+    return { ok: false, error: 'INVALID_PAIRING_CODE' }
   }
 
   try {
-    // Use production connectDevelopmentWorkspace path
-    // Extension doesn't know this is a test - it's the real connection
+    const pairingCode = message.pairingCode.toUpperCase()
+    // Resolve independently as proof that the human-facing token went through
+    // FeltDB's production discovery path. Never treat it as a workspace ID.
+    const resolution = await resolvePairingCode(pairingCode)
     const workspace = await connectDevelopmentWorkspace({
-      pairingCode: message.pairingCode,
+      pairingCode,
+      clientId: 'firefox-extension',
+      clientType: 'browser',
     })
+    if (workspace.workspaceId !== resolution.workspaceId) {
+      throw new Error('PAIRING_RESOLUTION_MISMATCH')
+    }
+    await workspace.connect()
 
     // Store connection in extension state
     extensionWorkspace = {
@@ -89,15 +110,51 @@ async function handleFeltDBBootstrap(message: RuntimeMessage): Promise<{ connect
       workspace: workspace,
     }
 
-    console.info('[Firefox Bootstrap] Connected to workspace', workspace.workspaceId)
+    console.info('[Runtime Investigator] Connected to workspace', workspace.workspaceId)
 
     return {
-      connected: true,
+      ok: true,
       workspaceId: workspace.workspaceId,
+      clientId: workspace.clientId,
+      clientType: workspace.clientType,
     }
   } catch (error) {
-    console.error('[Firefox Bootstrap] Connection failed', error)
-    return { connected: false }
+    console.error('[Runtime Investigator] Connection failed', error)
+    return { ok: false, error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+async function handleInvestigationHandoff(message: RuntimeMessage): Promise<InvestigationHandoffResult> {
+  const connection = extensionWorkspace?.workspace
+  if (!extensionWorkspace?.connected || !connection) {
+    return { ok: false, error: 'WORKSPACE_NOT_CONNECTED' }
+  }
+  if (!message.investigation || typeof message.investigation !== 'object' || Array.isArray(message.investigation)) {
+    return { ok: false, error: 'INVALID_INVESTIGATION' }
+  }
+
+  try {
+    const envelope = {
+      kind: 'runtime_investigation',
+      schemaVersion: 1,
+      workspaceId: extensionWorkspace.workspaceId,
+      lifecycle: 'NEW',
+      source: {
+        clientId: connection.clientId,
+        clientType: connection.clientType,
+        product: 'chrome-runtime-investigator',
+      },
+      sentAt: Date.now(),
+      investigation: structuredClone(message.investigation),
+    }
+    const entityId = await connection.publish('runtime_investigations', envelope)
+    // FeltDB assigns the durable identity. Persist it back onto the same entity so
+    // clients that reconnect and query retain that identity, not a local surrogate.
+    await connection.update('runtime_investigations', entityId, { entityId })
+    return { ok: true, entityId, workspaceId: extensionWorkspace.workspaceId }
+  } catch (error) {
+    console.error('[Runtime Investigator] Investigation handoff failed', error)
+    return { ok: false, error: error instanceof Error ? error.message : String(error) }
   }
 }
 
@@ -116,7 +173,14 @@ chrome.runtime.onMessage.addListener(
     // FeltDB test bootstrap (privileged, extension-only)
     if (message?.type === 'feltdb:test-bootstrap') {
       void handleFeltDBBootstrap(message).then(sendResponse).catch((error) => {
-        sendResponse({ connected: false, error: String(error) })
+        sendResponse({ ok: false, error: String(error) })
+      })
+      return true
+    }
+
+    if (message?.type === 'runtime-investigator:send-to-ide') {
+      void handleInvestigationHandoff(message).then(sendResponse).catch((error) => {
+        sendResponse({ ok: false, error: String(error) })
       })
       return true
     }

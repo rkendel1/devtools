@@ -12,8 +12,10 @@ import { useReplay } from '../../hooks/useReplay'
 import { ReplayPanel } from '../../components/ReplayPanel'
 import { createReplayEvidenceNodes } from '../../lib/replayFeltDB'
 
-export function InvestigationDetails({ record, exportFormat, setExportFormat, copyDetails, exportDetails, reinvestigate, runAction, contextValid, aiModel, setAiModel, aiStatus, aiLoading, aiQuestion, setAiQuestion, aiAnswer, enhanceCurrent, askCurrent }: {
+export function InvestigationDetails({ record, workspaceConnected, sendToIde, exportFormat, setExportFormat, copyDetails, exportDetails, reinvestigate, runAction, contextValid, aiModel, setAiModel, aiStatus, aiLoading, aiQuestion, setAiQuestion, aiAnswer, enhanceCurrent, askCurrent }: {
   record: InvestigationRecord; exportFormat: ExportFormat; setExportFormat: (format: ExportFormat) => void
+  workspaceConnected: boolean
+  sendToIde: (record: InvestigationRecord) => Promise<{ entityId: string; workspaceId: string }>
   copyDetails: () => Promise<string>; exportDetails: () => string; reinvestigate: () => string
   runAction: (action: 'compare' | 'source' | 'trace') => string; contextValid: boolean
   aiModel: string; setAiModel: (model: string) => void; aiStatus: string; aiLoading: boolean
@@ -26,6 +28,21 @@ export function InvestigationDetails({ record, exportFormat, setExportFormat, co
   const [comparisonInvestigation, setComparisonInvestigation] = useState<InvestigationRecord | null>(null)
   const replay = useReplay()
   const [showReplayButton, setShowReplayButton] = useState(true)
+  const [handoffState, setHandoffState] = useState<'idle' | 'sending' | 'sent'>('idle')
+  const [handoffMessage, setHandoffMessage] = useState('')
+
+  const handleSendToIde = async () => {
+    setHandoffState('sending')
+    setHandoffMessage('')
+    try {
+      const result = await sendToIde(record)
+      setHandoffState('sent')
+      setHandoffMessage(`✓ Sent to IDE · ${result.entityId}`)
+    } catch (error) {
+      setHandoffState('idle')
+      setHandoffMessage(`Send failed: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
 
   const handleReplay = async () => {
     setShowReplayButton(false)
@@ -76,6 +93,14 @@ export function InvestigationDetails({ record, exportFormat, setExportFormat, co
     <div className="result-heading"><div><h2>⚠ Likely cause</h2><p>{result.diagnosis}</p></div><div className="confidence">{Math.round(result.confidence * 100)}%<span>confidence</span></div></div>
     <div className="badges"><span className="badge">{graph.request.status} {graph.request.method}</span>{graph.redactionApplied && <span className="badge">Sensitive data redacted</span>}<span className="badge">{record.occurrenceCount ?? 1} occurrence(s)</span></div>
     <p className="request-url">{graph.request.url}</p>
+
+    <div className="actions">
+      <button className="primary" onClick={() => void handleSendToIde()} disabled={!workspaceConnected || handoffState !== 'idle'}>
+        {handoffState === 'sending' ? 'Sending…' : handoffState === 'sent' ? '✓ Sent to IDE' : 'Send to IDE'}
+      </button>
+      {!workspaceConnected && <span className="meta">Connect a development workspace to enable IDE handoff.</span>}
+    </div>
+    {handoffMessage && <p className={handoffState === 'sent' ? 'status' : 'action-result'}>{handoffMessage}</p>}
 
     <h3>Evidence</h3><ul className="list">{result.evidence.map((item) => <li key={item}>{item}</li>)}</ul>
     {!!graph.anomalies.length && <><h3>Potential anomalies</h3><ul className="list">{graph.anomalies.map((item) => <li key={item}>{item}</li>)}</ul></>}
