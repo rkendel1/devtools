@@ -132,8 +132,8 @@ export interface DevelopmentTask {
 export interface CodeChange {
   id: string
   workspaceId: string
-  taskId?: string
-  investigationId?: string
+  taskId: string
+  investigationId: string
   kind: 'code_change'
   label: string
   description: string
@@ -144,7 +144,7 @@ export interface CodeChange {
   newText?: string
   createdAt: number
   createdBy?: string
-  status: 'draft' | 'proposed' | 'applied' | 'reverted'
+  status: 'PUBLISHED' | 'READY_FOR_VERIFICATION' | 'VERIFYING' | 'VERIFIED' | 'FAILED'
   properties: {
     changeType?: 'add' | 'modify' | 'delete'
     context?: Record<string, unknown>
@@ -154,19 +154,38 @@ export interface CodeChange {
 export interface VerificationRun {
   id: string
   workspaceId: string
+  taskId: string
   codeChangeId: string
   investigationId: string
+  replayFixtureId: string
   kind: 'verification_run'
   label: string
-  status: 'pending' | 'running' | 'passed' | 'failed'
-  replayId?: string
-  replayStatus?: 'REPRODUCED' | 'NOT_REPRODUCED' | 'UNDETERMINED'
-  confidence?: number
-  createdAt: number
+  status: 'pending' | 'running' | 'completed' | 'failed'
+  startedAt: number
   completedAt?: number
   properties: {
     notes?: string
   }
+}
+
+export interface VerificationResult {
+  id: string
+  workspaceId: string
+  taskId: string
+  verificationRunId: string
+  codeChangeId: string
+  investigationId: string
+  kind: 'verification_result'
+  originalOutcome: number
+  newOutcome: number
+  newErrors: string[]
+  status: 'FIXED' | 'NOT_FIXED' | 'REGRESSION' | 'INCONCLUSIVE'
+  confidence: number
+  createdAt: number
+  evidence: Array<{
+    nodeId: string
+    type: 'replay' | 'investigation' | 'observation'
+  }>
 }
 
 export function createWorkspaceId(): string {
@@ -183,4 +202,8 @@ export function createCodeChangeId(): string {
 
 export function createVerificationRunId(): string {
   return `verify:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`
+}
+
+export function createVerificationResultId(): string {
+  return `result:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`
 }
