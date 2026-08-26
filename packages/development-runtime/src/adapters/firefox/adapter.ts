@@ -176,6 +176,28 @@ export class FirefoxAdapter implements BrowserRuntimeAdapter {
    * Inspect element and get detailed properties
    */
   async inspectElement(query: string): Promise<ElementMetrics> {
+    // First try direct access (for WebDriver and test contexts)
+    try {
+      if (typeof document !== 'undefined') {
+        const el = document.querySelector(query)
+        if (el) {
+          const rect = el.getBoundingClientRect()
+          const style = window.getComputedStyle(el)
+          return {
+            width: rect.width,
+            height: rect.height,
+            x: rect.left,
+            y: rect.top,
+            display: style.display,
+            visibility: style.visibility,
+          }
+        }
+      }
+    } catch (e) {
+      // Fallback to script execution
+    }
+
+    // Fallback to script execution (for browser extension context)
     const metrics = await this.executeInBrowser(`
       const el = document.querySelector('${this.escapeForScript(query)}');
       if (!el) throw new Error('Element not found: ${query}');
@@ -212,12 +234,26 @@ export class FirefoxAdapter implements BrowserRuntimeAdapter {
     let attempts = 0
 
     while (attempts < maxAttempts) {
+      // Try direct access first (for WebDriver and test contexts)
+      try {
+        if (typeof document !== 'undefined') {
+          if (document.readyState === 'complete') {
+            // Extra wait for async frameworks (React, Vue, etc.)
+            await new Promise((resolve) => setTimeout(resolve, 500))
+            return
+          }
+        }
+      } catch (e) {
+        // Fallback to script execution
+      }
+
+      // Fallback to script execution
       const isReady = await this.executeInBrowser(`
         document.readyState === 'complete'
       `)
 
       if (isReady) {
-        // Extra wait for async frameworks (React, Vue, etc.)
+        // Extra wait for async frameworks
         await new Promise((resolve) => setTimeout(resolve, 500))
         return
       }
