@@ -10,7 +10,8 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "demo": "node --loader ts-node/esm demo/demo.ts"
   },
   "dependencies": {
     "@feltdb/core": "^0.5.1",
