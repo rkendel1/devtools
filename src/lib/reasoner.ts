@@ -36,7 +36,12 @@ export function reasonFromEvidence(graph: EvidenceGraph): InvestigationResult {
   let alternatives: string[] = []
   let nextActions: string[] = []
 
-  if (status === 0) {
+  if (graph.request.protocol === 'WebSocket' && status === 101) {
+    diagnosis = 'Successful WebSocket upgrade; connection lifetime is expected and is not HTTP request latency.'
+    confidence = 0.98
+    alternatives = []
+    nextActions = ['Inspect WebSocket frames if application messages are failing']
+  } else if (status === 0) {
     if (hasCorsSignal) {
       diagnosis = 'Likely cause: CORS or network failure blocked the request before a response was received.'
       confidence = 0.91

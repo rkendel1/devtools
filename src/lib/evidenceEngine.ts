@@ -1,6 +1,7 @@
 import type { ConsoleEvent, EvidenceGraph, JsonObject, NetworkRequestSnapshot, PrivacySettings, TraceStep } from './types'
 import { redactHeaders, redactText } from './redaction'
 import { normalizeJsonDeterministic } from './wasm'
+import { classifyRuntimeProtocol, isExpectedLongLivedProtocol, isViteHmr } from './runtimeProtocol'
 
 function parseJsonObject(input: string | undefined): JsonObject | undefined {
   if (!input) return undefined
@@ -89,6 +90,7 @@ function diffHeaders(previous: Record<string, string> | undefined, current: Reco
 }
 
 function buildTrace(request: NetworkRequestSnapshot, relatedEvents: ConsoleEvent[], diffCount: number): TraceStep[] {
+  const protocol = classifyRuntimeProtocol(request)
   const trace: TraceStep[] = [
     {
       label: `Request started${request.initiator?.functionName ? ` (${request.initiator.functionName})` : ''}`,
@@ -96,7 +98,7 @@ function buildTrace(request: NetworkRequestSnapshot, relatedEvents: ConsoleEvent
       line: request.initiator?.line,
     },
     { label: `${request.method} ${request.url}${request.timingMs ? ` — ${Math.round(request.timingMs)}ms` : ''}` },
-    { label: `Response ${request.status} ${request.statusText}`.trim() },
+    { label: `${protocol}${isViteHmr(request) ? ' (Vite HMR)' : ''}: Response ${request.status} ${request.statusText}`.trim() },
   ]
   if (diffCount) trace.push({ label: `${diffCount} payload field(s) differ from last successful request` })
 
@@ -119,16 +121,18 @@ function detectAnomalies(
   headerDiff: string[],
 ): string[] {
   const anomalies: string[] = []
+  const protocol = classifyRuntimeProtocol(request)
+  const longLived = isExpectedLongLivedProtocol(protocol)
 
   const duplicateCount = allRequests.filter((candidate) => candidate.url === request.url && candidate.method === request.method).length
-  if (duplicateCount >= 5) {
+  if (duplicateCount >= 5 && !longLived) {
     anomalies.push(`${request.url} requested ${duplicateCount} times in this session.`)
   }
 
-  if (request.timingMs && request.timingMs > 3000) {
+  if (request.timingMs && request.timingMs > 3000 && !longLived) {
     anomalies.push(`Request latency is high (${Math.round(request.timingMs)} ms).`)
   }
-  if (request.timingMs && request.timingMs > 8000) {
+  if (request.timingMs && request.timingMs > 8000 && !longLived) {
     anomalies.push('Request exceeded 8s — likely timeout or stalled connection.')
   }
 
@@ -200,6 +204,7 @@ export function buildEvidenceGraph(
       method: request.method,
       url: request.url,
       status: request.status,
+      protocol: classifyRuntimeProtocol(request),
     },
     initiator: {
       source: request.initiator?.source,

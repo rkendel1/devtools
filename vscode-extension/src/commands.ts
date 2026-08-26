@@ -4,6 +4,7 @@ import type { InvestigationProvider, InvestigationTreeItem } from './investigati
 import { InvestigationView, sourceLocation } from './investigation-view.js'
 
 type CommandItem = InvestigationItem | InvestigationTreeItem | undefined
+const announcedConnections = new WeakMap<FeltWorkspaceClient, string>()
 
 export function registerCommands(context: vscode.ExtensionContext, client: FeltWorkspaceClient, provider: InvestigationProvider): vscode.Disposable[] {
   let lastEnteredCode = context.globalState.get<string>('feltdb.lastPairingCode', '')
@@ -23,6 +24,7 @@ export function registerCommands(context: vscode.ExtensionContext, client: FeltW
   })
   const disconnect = vscode.commands.registerCommand('feltdb.disconnectWorkspace', async () => {
     await client.disconnect()
+    announcedConnections.delete(client)
     provider.clear()
     await vscode.commands.executeCommand('setContext', 'feltdb.connected', false)
   })
@@ -125,11 +127,16 @@ async function connectWithCode(pairingCode: string, context: vscode.ExtensionCon
       await provider.refresh()
     })
     await vscode.commands.executeCommand('setContext', 'feltdb.connected', true)
-    if (showErrors) void vscode.window.showInformationMessage(`Connected to FeltDB workspace ${client.workspaceId}`, 'Open Investigations').then((choice) => {
+    const workspaceId = client.workspaceId
+    if (showErrors && workspaceId && announcedConnections.get(client) !== workspaceId) {
+      announcedConnections.set(client, workspaceId)
+      void vscode.window.showInformationMessage(`Connected to FeltDB workspace ${workspaceId}`, 'Open Investigations').then((choice) => {
       if (choice === 'Open Investigations') void vscode.commands.executeCommand('feltdb.runtimeInvestigations.focus')
-    })
+      })
+    }
   } catch (error) {
     try { await client.disconnect() } catch { /* Preserve the original connection error. */ }
+    announcedConnections.delete(client)
     await vscode.commands.executeCommand('setContext', 'feltdb.connected', false)
     if (showErrors) await vscode.window.showErrorMessage(connectionError(pairingCode, error), { modal: true })
   }

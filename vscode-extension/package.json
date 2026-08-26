@@ -2,7 +2,7 @@
   "name": "feltdb-runtime-investigations",
   "displayName": "FeltDB Runtime Investigations",
   "description": "Receive durable browser runtime investigations from FeltDB workspaces.",
-  "version": "0.4.3",
+  "version": "0.6.1",
   "private": true,
   "type": "module",
   "engines": { "vscode": "^1.95.0" },

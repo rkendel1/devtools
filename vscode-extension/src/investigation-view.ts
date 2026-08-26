@@ -82,7 +82,7 @@ function renderDevelopmentActivity(item: InvestigationItem): string {
   if (!activity.length) return ''
   const files = [...new Set(activity.flatMap((entry) => entry.changedFiles.map((file) => file.path)))]
   const git = activity.at(-1)?.git
-  return section('Development Activity', `${list(files.map((file) => `Changed: ${file}`))}${git ? `<div class="grid"><span class="label">Branch</span><span>${escape(git.branch ?? 'Unknown')}</span><span class="label">Commit</span><code>${escape(git.commit?.slice(0, 12) ?? 'Uncommitted')}</code><span class="label">Author</span><span>${escape(git.author ?? 'Unknown')}</span></div>${git.diffStat ? `<pre>${escape(git.diffStat)}</pre>` : ''}` : '<p>Git metadata unavailable.</p>'}`)
+  return section('Development Activity', `${list(files.map((file) => `Changed: ${file}`))}${git ? `<div class="grid"><span class="label">Branch</span><span>${escape(git.branch ?? 'Unknown')}</span><span class="label">Commit</span><code>${escape(git.commit?.slice(0, 12) ?? 'Uncommitted')}</code><span class="label">Author</span><span>${escape(git.author ?? 'Unknown')}</span></div>${git.diffStat ? `<pre>${escape(git.diffStat)}</pre>` : ''}${git.diff ? `<details><summary>View diff</summary><pre>${escape(git.diff)}</pre></details>` : ''}` : '<p>Git metadata unavailable.</p>'}`)
 }
 
 function data(value: unknown): string { return value == null ? '<p>No payload data persisted.</p>' : `<pre>${escape(JSON.stringify(value, null, 2))}</pre>` }

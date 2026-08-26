@@ -8,7 +8,6 @@ import {
 } from './retention'
 
 type StoredRecord<T> = T & { id: string; __version?: number }
-const DATABASE_NAME = 'feltdb:chrome-runtime-investigator-v2'
 
 export interface ModelFinding {
   id: string
@@ -92,7 +91,8 @@ class FeltRepository {
       if (!active || running) return
       running = true
       try {
-        const records = await this.readNativeCollection<InvestigationRecord>('investigations')
+        this.ensure()
+        const records = await this.histories!.all()
         if (active) callback(this.sort(records.map(stripDatabaseFields)))
       } catch (error) {
         console.warn('[Runtime Investigator] History refresh failed', error)
@@ -279,14 +279,15 @@ class FeltRepository {
       if (!active || running) return
       running = true
       try {
+        this.ensure()
         const [nodes, edges] = await Promise.all([
-          this.readNativeCollection<StoredEvidenceNode>('evidence_nodes'),
-          this.readNativeCollection<StoredEvidenceEdge>('evidence_edges'),
+          this.nodes!.find({ investigationId }),
+          this.edges!.find({ investigationId }),
         ])
         const value = boundedNeighborhood(
           investigationRootId(investigationId),
-          nodes.filter((node) => node.investigationId === investigationId),
-          edges.filter((edge) => edge.investigationId === investigationId),
+          nodes,
+          edges,
           4,
           80,
         )
@@ -300,45 +301,6 @@ class FeltRepository {
     void refresh()
     const timer = window.setInterval(() => void refresh(), 1000)
     return () => { active = false; window.clearInterval(timer) }
-  }
-
-  private readNativeCollection<T>(collection: string): Promise<T[]> {
-    return new Promise((resolve, reject) => {
-      const openRequest = indexedDB.open(DATABASE_NAME, 1)
-      openRequest.onerror = () => reject(openRequest.error ?? new Error('Failed to open FeltDB IndexedDB'))
-      openRequest.onsuccess = () => {
-        const database = openRequest.result
-        let transaction: IDBTransaction
-        try {
-          transaction = database.transaction('rows', 'readonly')
-        } catch (error) {
-          database.close()
-          reject(error)
-          return
-        }
-        const values: T[] = []
-        const cursorRequest = transaction.objectStore('rows').openCursor()
-        cursorRequest.onerror = () => reject(cursorRequest.error ?? new Error('Failed to read FeltDB rows'))
-        cursorRequest.onsuccess = () => {
-          const cursor = cursorRequest.result
-          if (!cursor) return
-          if (String(cursor.key).startsWith(`${collection}:`)) values.push(cursor.value as T)
-          cursor.continue()
-        }
-        transaction.oncomplete = () => {
-          database.close()
-          resolve(values)
-        }
-        transaction.onerror = () => {
-          database.close()
-          reject(transaction.error ?? new Error('Failed to read FeltDB collection'))
-        }
-        transaction.onabort = () => {
-          database.close()
-          reject(transaction.error ?? new Error('FeltDB read transaction aborted'))
-        }
-      }
-    })
   }
 
   addNode(node: StoredEvidenceNode): void {

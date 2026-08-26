@@ -21,6 +21,7 @@ import { WorkspaceConnection } from './components/WorkspaceConnection'
 
 type ExportFormat = 'text' | 'markdown' | 'jira' | 'json'
 type Filters = { query: string; status: string; domain: string; type: string; timeframe: string }
+type VerificationState = { phase: 'VERIFYING' | 'RESULT'; files?: string[]; outcome?: string; originalStatus?: number; verificationStatus?: number; changeId?: string; verificationId?: string; diff?: string; branch?: string; commit?: string; method?: string; url?: string }
 
 const EMPTY_FILTERS: Filters = { query: '', status: 'all', domain: 'all', type: 'all', timeframe: 'all' }
 
@@ -53,6 +54,8 @@ export default function App() {
   const [workspaceId, setWorkspaceId] = useState<string>('')
   const [workspaceError, setWorkspaceError] = useState<string>('')
   const [workspaceLoading, setWorkspaceLoading] = useState(false)
+  const [verificationState, setVerificationState] = useState<VerificationState | null>(null)
+  const verificationStateRef = useRef<VerificationState | null>(null)
   const lastRuntimeEvent = useRef(0)
 
   const { screenshots, setScreenshots, recordingScreens, setRecordingScreens, captureFrame, copyScreenshot } = useScreenshots(setMessage)
@@ -60,6 +63,7 @@ export default function App() {
   useEffect(() => { requestsRef.current = requests }, [requests])
   useEffect(() => { historyRef.current = history }, [history])
   useEffect(() => { privacyRef.current = privacy }, [privacy])
+  useEffect(() => { verificationStateRef.current = verificationState }, [verificationState])
 
   useEffect(() => {
     let cancelled = false
@@ -89,9 +93,17 @@ export default function App() {
   useMaintenance(requestsRef, setRequests, setSelectedRequestId, setLastCleanup, setMessage)
 
   useEffect(() => {
-    const listener = (progress: { type?: string; target?: string; progress?: number; text?: string }) => {
+    const listener = (progress: { type?: string; target?: string; progress?: number; text?: string; change?: any; result?: any }) => {
       if (progress.type === 'runtime-investigator:ai-progress' && progress.target === 'panel') {
         setAiStatus(`${Math.round((progress.progress ?? 0) * 100)}% ${progress.text ?? 'Loading local model'}`)
+      }
+      if (progress.type === 'runtime-investigator:change-applied') {
+        setVerificationState({ phase: 'VERIFYING', files: (progress.change?.files ?? []).map((file: any) => file.path), changeId: progress.change?.changeId, verificationId: progress.change?.verificationId, diff: progress.change?.git?.diff, branch: progress.change?.git?.branch, commit: progress.change?.git?.commit, method: progress.change?.originalContext?.method, url: progress.change?.originalContext?.url })
+        setMessage('Development change observed · waiting for matching runtime verification')
+      }
+      if (progress.type === 'runtime-investigator:verification-result') {
+        setVerificationState((current) => ({ ...current, phase: 'RESULT', outcome: progress.result?.outcome, originalStatus: progress.result?.originalStatus, verificationStatus: progress.result?.verificationStatus }))
+        setMessage(`Verification ${progress.result?.outcome ?? 'complete'}`)
       }
     }
     chrome.runtime.onMessage.addListener(listener)
@@ -113,6 +125,11 @@ export default function App() {
         setWorkspaceConnected(true)
         setWorkspaceId(response.workspaceId || '')
         setMessage(`Connected to workspace: ${response.workspaceId}`)
+        if (response.activeVerification) {
+          const latest = response.activeVerification.developmentActivity?.at(-1)
+          const original = response.activeVerification.investigation?.graph?.request
+          setVerificationState({ phase: 'VERIFYING', files: latest?.changedFiles?.map((file: any) => file.path) ?? [], changeId: response.activeVerification.changeId, verificationId: response.activeVerification.verificationId, diff: latest?.git?.diff, branch: latest?.git?.branch, commit: latest?.git?.commit, method: original?.method, url: original?.url })
+        }
       } else {
         throw new Error(response?.error || 'Failed to connect to workspace')
       }
@@ -199,7 +216,15 @@ export default function App() {
     void captureRequests(MAX_LIVE_REQUESTS).then(addRequests)
     return subscribeToRequests((request) => {
       addRequests([request])
-      if (autoInvestigate && request.status >= 400) void investigateRequest(request, true)
+      const verification = verificationStateRef.current
+      const matchesVerification = verification?.phase === 'VERIFYING'
+        && verification.method === request.method
+        && verification.url != null
+        && endpointKey(request) === endpointKey({ ...request, method: verification.method, url: verification.url })
+      if (verification?.phase === 'VERIFYING') {
+        void chrome.runtime.sendMessage({ type: 'runtime-investigator:runtime-active' }).catch(() => undefined)
+      }
+      if (matchesVerification || (autoInvestigate && request.status >= 400)) void investigateRequest(request, true)
     })
   // The listener reads current values from refs; resubscribe only when auto mode changes.
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -321,6 +346,19 @@ export default function App() {
           error={workspaceError}
           loading={workspaceLoading}
         />
+
+        {verificationState && <section className="settings">
+          <h3>{verificationState.phase === 'VERIFYING' ? '⟳ Verification in progress' : verificationState.outcome === 'FIXED' ? '✓ Fix verified' : `Verification: ${verificationState.outcome}`}</h3>
+          <ol>
+            <li>Original observation{investigation ? ` · ${investigation.graph.request.method} ${investigation.graph.request.url} · status ${investigation.graph.request.status}` : ''}</li>
+            <li>Sent to IDE</li>
+            <li>Change detected{verificationState.files?.length ? ` · ${verificationState.files.join(', ')}` : ''}</li>
+            <li>Application runtime observable</li>
+            <li>{verificationState.phase === 'RESULT' ? `${verificationState.outcome} · ${verificationState.originalStatus} → ${verificationState.verificationStatus}` : 'Waiting for matching verification observation'}</li>
+          </ol>
+          {(verificationState.branch || verificationState.commit) && <p>Git: {verificationState.branch ?? 'unknown branch'} · {verificationState.commit?.slice(0, 12) ?? 'uncommitted'}</p>}
+          {verificationState.diff && <details><summary>View diff</summary><pre>{verificationState.diff}</pre></details>}
+        </section>}
 
         {showPrivacy && <section className="settings">
           <h3>Privacy and bundle settings</h3>

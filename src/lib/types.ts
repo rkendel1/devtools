@@ -1,3 +1,5 @@
+import type { RuntimeProtocol } from './runtimeProtocol'
+
 export type JsonObject = Record<string, unknown>
 
 export interface NetworkRequestSnapshot {
@@ -58,6 +60,7 @@ export interface EvidenceGraph {
     method: string
     url: string
     status: number
+    protocol?: RuntimeProtocol
   }
   initiator?: {
     source?: string
