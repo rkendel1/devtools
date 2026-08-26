@@ -11,8 +11,8 @@ import type {
   DevelopmentTask,
   CodeChange,
   VerificationResult,
-  VisualSelection,
 } from '@feltdb/core/workspace'
+import type { VisualSelection } from './developmentWorkspace'
 
 export interface WorkspaceConnectionConfig {
   workspaceId: string

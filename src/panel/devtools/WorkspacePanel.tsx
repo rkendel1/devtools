@@ -12,7 +12,8 @@
 import React, { useEffect, useState } from 'react'
 import type { DevToolsWorkspaceStatus } from './workspaceClient'
 import { DevToolsWorkspaceClient } from './workspaceClient'
-import type { VisualSelection, CodeChange, VerificationResult } from '@feltdb/core/workspace'
+import type { CodeChange, VerificationResult } from '@feltdb/core/workspace'
+import type { VisualSelection } from '../../lib/developmentWorkspace'
 import { DevelopmentRuntime, createChromiumAdapter } from '@feltdb/development-runtime'
 import type { VerificationOutcome } from '@feltdb/development-runtime'
 import { SelectionModeUI } from './components/SelectionModeUI'
@@ -70,8 +71,8 @@ export const WorkspacePanel: React.FC<WorkspacePanelProps> = ({
       client.subscribe('verification_result', (result: VerificationResult) => {
         if (result.taskId === currentTask?.id) {
           setVerificationResult(result)
-          setPhase(result.status === 'FIXED' ? 'verified' : 'idle')
-          setMessage(result.status === 'FIXED' ? '✓ FIX VERIFIED' : 'Verification failed')
+          setPhase(result.status === 'fixed' ? 'verified' : 'idle')
+          setMessage(result.status === 'fixed' ? '✓ FIX VERIFIED' : 'Verification failed')
         }
       })
     })
@@ -135,7 +136,11 @@ export const WorkspacePanel: React.FC<WorkspacePanelProps> = ({
           elementQuery: selection.selector,
           boundingBox: selection.boundingBox,
           sourceHints: {
-            sourceLocations: selection.sourceHints || [],
+            sourceLocations: (selection.sourceHints || []).map((location) => ({
+              ...location,
+              line: location.line ?? 1,
+              confidence: 'MEDIUM' as const,
+            })),
           },
         },
         change: detectedChange,
@@ -147,16 +152,12 @@ export const WorkspacePanel: React.FC<WorkspacePanelProps> = ({
         workspaceId,
         taskId: currentTask.id,
         codeChangeId: detectedChange.id,
-        verificationRunId: `verify:${Date.now()}`,
-        investigationId: '',
-        kind: 'verification_result',
-        status: outcome.status,
-        confidence: outcome.confidence,
+        status: outcome.status === 'FIXED' ? 'fixed' : outcome.status === 'REGRESSION' ? 'regressed' : 'unchanged',
+        summary: outcome.status === 'FIXED' ? 'Fix verified' : 'Verification did not confirm the fix',
         originalOutcome: 200,
         newOutcome: 200,
-        newErrors: [],
+        newErrors: outcome.status === 'REGRESSION' ? 1 : 0,
         createdAt: Date.now(),
-        evidence: outcome.evidence.domChanges || [],
       }
 
       client.publishVerificationResult(result)

@@ -8,7 +8,7 @@
  */
 
 import type { ExperimentResult } from './replayExperiment'
-import type { FeltNode, FeltEdge } from './feltRepository'
+import type { FeltNode, FeltEdge } from './evidenceGraph'
 
 export interface CounterfactualEvidence {
   nodes: FeltNode[]
@@ -27,7 +27,7 @@ export function createCounterfactualEvidenceNodes(
   nodes.push({
     id: result.experimentId,
     kind: 'counterfactual_experiment',
-    label: `Experiment: ${result.mutation?.target || 'unknown'}`,
+    label: `Experiment: ${result.isolatedVariable || 'unknown'}`,
     properties: {
       status: result.status,
       confidence: result.confidence,

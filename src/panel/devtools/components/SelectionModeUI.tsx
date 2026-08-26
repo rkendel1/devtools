@@ -7,7 +7,7 @@
  */
 
 import React, { useEffect, useState } from 'react'
-import type { VisualSelection } from '@feltdb/core/workspace'
+import type { VisualSelection } from '../../../lib/developmentWorkspace'
 import type { Selection as RuntimeSelection } from '@feltdb/development-runtime'
 import { createSelectionId } from '../../../lib/developmentWorkspace'
 

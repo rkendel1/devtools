@@ -8,7 +8,7 @@
  * Key property: Durable. Survives restart. Clients reconnect to same state.
  */
 
-import type { FeltNode, FeltEdge } from './feltRepository'
+import type { FeltNode, FeltEdge } from './evidenceGraph'
 
 export interface WorkspaceObject {
   [key: string]: unknown
@@ -69,7 +69,7 @@ export class WorkspaceStore {
 
   set(workspaceId: string, key: string, value: unknown): void {
     const workspace = this.createOrGet(workspaceId)
-    workspace.objects.set(key, value)
+    workspace.objects.set(key, value as WorkspaceObject)
     workspace.lastModifiedAt = Date.now()
 
     // Notify subscribers

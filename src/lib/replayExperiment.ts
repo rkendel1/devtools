@@ -67,7 +67,9 @@ export function applyMutation(fixture: ReplayFixture, mutation: Mutation): Repla
   if (mutation.type === 'timing') {
     const requestIndex = parseInt(mutation.target.split(':')[1] || '0', 10)
     if (mutated.networkFixtures && mutated.networkFixtures[requestIndex]) {
-      mutated.networkFixtures[requestIndex].delay = mutation.newValue as number
+      const delay = mutation.newValue as number
+      mutated.networkFixtures[requestIndex].delay = delay
+      mutated.networkFixtures[requestIndex].timing = { delayMs: delay }
     }
   }
 
@@ -76,7 +78,9 @@ export function applyMutation(fixture: ReplayFixture, mutation: Mutation): Repla
     if (mutated.networkFixtures && mutated.networkFixtures[requestIndex]) {
       const [field] = mutation.target.split(':').slice(2)
       if (field === 'status') {
-        mutated.networkFixtures[requestIndex].status = mutation.newValue as number
+        const status = mutation.newValue as number
+        mutated.networkFixtures[requestIndex].status = status
+        mutated.networkFixtures[requestIndex].responseStatus = status
       }
       if (field === 'body') {
         mutated.networkFixtures[requestIndex].responseBody = mutation.newValue as string

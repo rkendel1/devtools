@@ -56,12 +56,12 @@ export const TaskDisplay: React.FC<TaskDisplayProps> = ({
           <div className="change-details">
             <div className="file-path">
               <span className="label">File</span>
-              <code>{detectedChange.filePath}</code>
+              <code>{detectedChange.sourceLocations[0]?.file ?? 'Unknown file'}</code>
             </div>
 
             <div className="line-range">
               <span className="label">Lines</span>
-              <span>{detectedChange.lineStart}-{detectedChange.lineEnd}</span>
+              <span>{detectedChange.sourceLocations[0]?.line ?? '?'}-{detectedChange.sourceLocations[0]?.endLine ?? '?'}</span>
             </div>
 
             <div className="description">

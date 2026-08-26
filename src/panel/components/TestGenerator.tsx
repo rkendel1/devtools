@@ -92,7 +92,7 @@ export function TestGenerator({ record }: { record: InvestigationRecord }) {
             <div className="patterns">
               <div className="pattern">
                 <strong>Click Button</strong>
-                <code>await page.getByRole("button", {{'{'}} name: /text/i {{'}'} }).click();</code>
+                <code>await page.getByRole("button", &#123; name: /text/i &#125;).click();</code>
               </div>
               <div className="pattern">
                 <strong>Fill Input</strong>
@@ -112,7 +112,7 @@ export function TestGenerator({ record }: { record: InvestigationRecord }) {
               </div>
               <div className="pattern">
                 <strong>Intercept Response</strong>
-                <code>await page.route("**/api/**", r =&#62; r.fulfill({{'{'}} status: 500 {{'}'} }));</code>
+                <code>await page.route("**/api/**", r =&#62; r.fulfill(&#123; status: 500 &#125;));</code>
               </div>
             </div>
 

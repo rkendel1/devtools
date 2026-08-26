@@ -6,11 +6,15 @@
  */
 
 import type {
-  DevelopmentWorkspace,
-  VisualSelection,
-  CodeChange,
   VerificationResult,
 } from '@feltdb/core/workspace'
+import type { VisualSelection } from '../../lib/developmentWorkspace'
+
+interface WorkspaceChannel {
+  subscribe(key: string, callback: (value: unknown) => void): () => void
+  write(key: string, value: unknown): void
+  read(key: string): unknown
+}
 
 export interface WorkspaceClientConfig {
   workspaceId: string
@@ -38,13 +42,13 @@ export interface DevToolsWorkspaceStatus {
  * Manages connection, subscriptions, and publishing to @feltdb/core workspace
  */
 export class DevToolsWorkspaceClient {
-  private workspace: DevelopmentWorkspace | null = null
+  private workspace: WorkspaceChannel | null = null
   private config: WorkspaceClientConfig | null = null
   private listeners: Map<string, Set<(value: any) => void>> = new Map()
   private subscriptionUnsubscribers: Map<string, () => void> = new Map()
 
   async connect(
-    workspace: DevelopmentWorkspace,
+    workspace: WorkspaceChannel,
     config: WorkspaceClientConfig,
   ): Promise<void> {
     this.workspace = workspace
@@ -65,7 +69,7 @@ export class DevToolsWorkspaceClient {
   private subscribeToKey(key: string): void {
     if (!this.workspace) return
 
-    const unsubscribe = this.workspace.subscribe(key, (value) => {
+    const unsubscribe = this.workspace.subscribe(key, (value: unknown) => {
       this.notifyListeners(key, value)
 
       // Track last event

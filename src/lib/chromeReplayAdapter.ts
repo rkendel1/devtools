@@ -144,7 +144,7 @@ export class ChromeReplayAdapter implements ReplayBrowser {
           timestamp: Date.now(),
         }
 
-        this.observation('event', `Target request captured: ${method} ${url} → ${this.targetRequest.status}`, true, {
+        this.observation('target_request', `Target request captured: ${method} ${url} → ${this.targetRequest.status}`, true, {
           event: this.targetRequest,
         })
 
@@ -178,7 +178,7 @@ export class ChromeReplayAdapter implements ReplayBrowser {
 
       this.runtimeErrors.push(runtimeError)
 
-      this.observation('event', `Runtime error: ${error.message}`, true, {
+      this.observation('runtime_error', `Runtime error: ${error.message}`, true, {
         event: runtimeError,
       })
     }

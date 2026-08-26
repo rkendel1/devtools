@@ -4,7 +4,8 @@
  */
 
 import React from 'react'
-import type { VerificationResult, CodeChange, VisualSelection } from '@feltdb/core/workspace'
+import type { VerificationResult, CodeChange } from '@feltdb/core/workspace'
+import type { VisualSelection } from '../../../lib/developmentWorkspace'
 
 interface VerificationPanelProps {
   result: VerificationResult
@@ -19,15 +20,13 @@ export const VerificationPanel: React.FC<VerificationPanelProps> = ({
   change,
   onReset,
 }) => {
-  const confidencePercent = Math.round((result.confidence ?? 0) * 100)
-
   return (
     <div className="verification-panel">
       <div className="verification-header">
-        <h3 className={`status ${result.status === 'FIXED' ? 'verified' : 'failed'}`}>
-          {result.status === 'FIXED' ? '✓ FIX VERIFIED' : '✗ Verification Failed'}
+        <h3 className={`status ${result.status === 'fixed' ? 'verified' : 'failed'}`}>
+          {result.status === 'fixed' ? '✓ FIX VERIFIED' : '✗ Verification Failed'}
         </h3>
-        <p className="confidence">Confidence: {confidencePercent}%</p>
+        <p className="confidence">{result.summary}</p>
       </div>
 
       <div className="comparison">
@@ -66,19 +65,6 @@ export const VerificationPanel: React.FC<VerificationPanelProps> = ({
         </div>
       </div>
 
-      {result.evidence && result.evidence.length > 0 && (
-        <div className="evidence-section">
-          <h4>Evidence</h4>
-          <ul className="evidence-list">
-            {result.evidence.map((item, index) => (
-              <li key={index} className="evidence-item">
-                <span className="evidence-type">{item.type || 'measurement'}</span>
-                <span className="evidence-value">{item.metric}: verified</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
 
       <div className="actions">
         <button className="primary reset-button" onClick={onReset}>

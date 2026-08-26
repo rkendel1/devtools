@@ -57,7 +57,7 @@ export interface TargetRequestEvent {
 }
 
 export interface ReplayBrowserObservation {
-  type: 'navigation' | 'interaction' | 'network' | 'runtime_error' | 'target_request' | 'outcome'
+  type: 'navigation' | 'interaction' | 'network' | 'event' | 'runtime_error' | 'target_request' | 'outcome'
   description: string
   success: boolean
   timestamp: number

@@ -265,6 +265,16 @@ class FeltRepository {
     return () => { unsubscribeNodes(); unsubscribeEdges() }
   }
 
+  addNode(node: StoredEvidenceNode): void {
+    this.ensure()
+    void this.nodes!.insert(node, node.id)
+  }
+
+  addEdge(edge: StoredEvidenceEdge): void {
+    this.ensure()
+    void this.edges!.insert(edge, edge.id)
+  }
+
   async searchSimilar(investigationId: string, limit = 5): Promise<InvestigationRecord[]> {
     this.ensure()
     const current = await this.histories!.get(investigationId)

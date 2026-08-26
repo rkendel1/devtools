@@ -86,7 +86,7 @@ export class CDPBridge {
 
   async attach(): Promise<void> {
     return new Promise((resolve, reject) => {
-      chrome.debugger.attach({ tabId: this.tabId }, this.version, (result) => {
+      chrome.debugger.attach({ tabId: this.tabId }, this.version, () => {
         if (chrome.runtime.lastError) {
           reject(new Error(`Failed to attach debugger: ${chrome.runtime.lastError.message}`))
         } else {

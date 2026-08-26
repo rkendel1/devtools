@@ -13,7 +13,7 @@
  * 7. Agent discovers result via FeltDB query
  */
 
-import type { ReplayFixture, ReplayRun, Observation } from './replayEngine'
+import type { ReplayFixture, ReplayRun } from './replayContract'
 import type { CodeChange, VerificationRun, VerificationResult } from './developmentWorkspace'
 import {
   createVerificationRunId,
@@ -34,7 +34,6 @@ export function createChangeFixture(
   return {
     ...originalFixture,
     id: `fixture:change:${change.id}`,
-    label: `Fixture with change: ${change.label}`,
   }
 }
 
@@ -154,5 +153,6 @@ export function buildVerificationRun(
     label: `Verification for change: ${codeChangeId}`,
     status: 'pending',
     startedAt: Date.now(),
+    properties: {},
   }
 }

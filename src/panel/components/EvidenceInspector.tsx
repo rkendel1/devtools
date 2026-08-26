@@ -146,7 +146,7 @@ export function EvidenceInspector({ neighborhood }: { neighborhood: EvidenceNeig
               <code>{selectedNode.id}</code>
             </div>
 
-            {selectedNode.kind === 'source' && selectedNode.data.source && (
+            {selectedNode.kind === 'source' && Boolean(selectedNode.data.source) && (
               <div className="detail-section">
                 <h5>Source Location</h5>
                 <button
@@ -155,7 +155,7 @@ export function EvidenceInspector({ neighborhood }: { neighborhood: EvidenceNeig
                     openSourceLocation(selectedNode.data.source as string, selectedNode.data.line as number | undefined)
                   }
                 >
-                  {selectedNode.data.source}
+                  {String(selectedNode.data.source)}
                   {selectedNode.data.line ? `:${selectedNode.data.line}` : ''}
                 </button>
               </div>

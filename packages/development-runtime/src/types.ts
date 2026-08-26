@@ -115,7 +115,7 @@ export interface ElementMetrics {
 
 export interface VerifyParams {
   selection: Selection
-  change: CodeChange // From workspace
+  change: { id: string; description: string }
 }
 
 export interface VerificationOutcome {

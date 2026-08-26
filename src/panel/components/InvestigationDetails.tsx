@@ -56,7 +56,11 @@ export function InvestigationDetails({ record, exportFormat, setExportFormat, co
       responseFingerprint: record.fingerprint || 'fp:unknown',
       errorFingerprints: graph.bundle?.runtimeEvents?.map((e) => `err:${e.message}`) || [],
       errorCount: graph.bundle?.runtimeEvents?.filter((e) => e.type === 'runtime.error').length || 0,
-      relevantRuntimeEvents: graph.bundle?.runtimeEvents || [],
+      relevantRuntimeEvents: (graph.bundle?.runtimeEvents || []).map((event) => ({
+        type: event.type === 'runtime.error' ? 'runtime.error' as const : 'console.error' as const,
+        message: event.message,
+        fingerprint: `err:${event.message}`,
+      })),
       timing: { requestDuration: 0, totalTime: 0 },
       causalEvidence: [record.id],
     }

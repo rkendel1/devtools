@@ -12,7 +12,7 @@
 
 import type { LocalFeltDBNode } from './localFeltDBNode'
 import { getLocalFeltDBNode } from './localFeltDBNode'
-import type { FeltNode, FeltEdge } from './feltRepository'
+import type { FeltNode, FeltEdge } from './evidenceGraph'
 
 export type ClientKind = 'chrome' | 'vscode' | 'cursor' | 'claude-code' | 'agent' | 'cli'
 

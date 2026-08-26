@@ -5,7 +5,7 @@ export type EvidenceLayer = 'observed' | 'inferred' | 'hypothesis' | 'rejected'
 export interface EvidenceClaim {
   layer: EvidenceLayer
   statement: string
-  confidence: ConfidenceScore
+  confidence: number
   evidence: string[]
   missingEvidence?: string[]
   rejectionReason?: string // Why was this hypothesis rejected?
@@ -21,7 +21,7 @@ export interface ConfidenceScore {
 
 export interface CausalChain {
   steps: CausalStep[]
-  confidence: ConfidenceScore
+  confidence: number
 }
 
 export interface CausalStep {
@@ -63,12 +63,7 @@ export function buildCausalChain(
         claim: {
           layer,
           statement,
-          confidence: createConfidenceScore({
-            causal: edge.confidence,
-            evidence: edge.confidence,
-            reproduction: false,
-            counterfactual: false,
-          }),
+          confidence: edge.confidence,
           evidence: edge.evidence,
           missingEvidence: layer !== 'observed' ? ['Full lifecycle trace'] : undefined,
         },
@@ -84,17 +79,11 @@ export function buildCausalChain(
 
   traverse(root.id, 0)
 
-  const avgCausal = steps.length > 0 ? steps.reduce((sum, s) => sum + s.claim.confidence.causal, 0) / steps.length : 0
-  const avgEvidence = steps.length > 0 ? steps.reduce((sum, s) => sum + s.claim.confidence.evidence, 0) / steps.length : 0
+  const averageConfidence = steps.length > 0 ? steps.reduce((sum, s) => sum + s.claim.confidence, 0) / steps.length : 0
 
   return {
     steps,
-    confidence: createConfidenceScore({
-      causal: avgCausal,
-      evidence: avgEvidence,
-      reproduction: false,
-      counterfactual: false,
-    }),
+    confidence: averageConfidence,
   }
 }
 

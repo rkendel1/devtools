@@ -135,7 +135,7 @@ export function sanitizeTestName(text: string): string {
     .replace(/[^a-z0-9]+/g, ' ')
     .trim()
     .replace(/\s+/g, '_')
-    .slice(0, 60)
+    .slice(0, 41)
 }
 
 export function exportTestAsFile(test: GeneratedTest, fileName?: string): void {

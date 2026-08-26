@@ -1,7 +1,23 @@
 import type { InvestigationRecord } from './types'
 
-export type EvidenceNodeKind = 'investigation' | 'request' | 'response' | 'runtime-event' | 'source' | 'issue-group'
-export type EvidenceEdgeKind = 'INITIATED_BY' | 'RETURNED' | 'FOLLOWED_BY' | 'THREW_AT' | 'OBSERVED_DURING' | 'DUPLICATE_OF'
+export type EvidenceNodeKind = 'investigation' | 'request' | 'response' | 'runtime-event' | 'source' | 'issue-group' | 'replay_run' | 'replay_observation'
+export type EvidenceEdgeKind = 'INITIATED_BY' | 'RETURNED' | 'FOLLOWED_BY' | 'THREW_AT' | 'OBSERVED_DURING' | 'DUPLICATE_OF' | 'produced_by_replay' | 'replay_observed'
+
+export interface FeltNode {
+  id: string
+  kind: string
+  label: string
+  properties: Record<string, unknown>
+  timestamp: number
+}
+
+export interface FeltEdge {
+  id: string
+  kind: string
+  from: string
+  to: string
+  properties: Record<string, unknown>
+}
 
 export interface StoredEvidenceNode {
   id: string

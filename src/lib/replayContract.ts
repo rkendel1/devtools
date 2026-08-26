@@ -63,6 +63,7 @@ export interface ReplayFixture {
   }
 
   createdAt: number
+  variables?: Record<string, unknown>
 }
 
 export type UserInteraction = NavigateInteraction | ClickInteraction | InputInteraction | WaitInteraction
@@ -99,6 +100,9 @@ export interface NetworkFixture {
   responseStatus: number
   responseHeaders: Record<string, string>
   responseBody: string
+  /** Legacy aliases retained for persisted phase-4 fixtures. */
+  status?: number
+  delay?: number
   timing?: { delayMs: number }
   priority?: number // Higher priority matches first
   matchCount?: number // How many times this was captured
@@ -180,7 +184,7 @@ export interface ReplayRun {
 
 export interface ReplayObservation {
   timestamp: number
-  type: 'navigation' | 'network' | 'interaction' | 'event' | 'outcome'
+  type: 'navigation' | 'network' | 'interaction' | 'event' | 'outcome' | 'target_request' | 'runtime_error'
   description: string
   success: boolean
   details?: Record<string, unknown>
@@ -270,7 +274,7 @@ export function createResponseFingerprint(
     Object.keys(headers)
       .sort()
       .join(','),
-    body ? Math.round(Buffer.byteLength(body) / 100).toString() : '0', // Size bucket
+    body ? Math.round(new TextEncoder().encode(body).byteLength / 100).toString() : '0', // Size bucket
   ]
 
   // Simple hash

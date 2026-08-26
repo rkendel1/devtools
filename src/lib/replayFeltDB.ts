@@ -44,6 +44,7 @@ export function createReplayEvidenceNodes(run: ReplayRun): {
   // Root replay run node
   const replayRunNode: ReplayEvidenceNode = {
     id: run.id,
+    investigationId: run.investigationId,
     kind: 'replay_run',
     label: `Replay #${run.id.split(':')[2]?.slice(0, 6) || 'unknown'}`,
     timestamp: run.startedAt,
@@ -62,6 +63,7 @@ export function createReplayEvidenceNodes(run: ReplayRun): {
 
     const obsNode: ReplayEvidenceNode = {
       id: obsId,
+      investigationId: run.investigationId,
       kind: 'replay_observation',
       label: `${obs.type}: ${obs.description.substring(0, 40)}`,
       timestamp: obs.timestamp,
@@ -75,6 +77,8 @@ export function createReplayEvidenceNodes(run: ReplayRun): {
 
     // Edge: replay run produced this observation
     edges.push({
+      id: `${run.id}|produced_by_replay|${obsId}`,
+      investigationId: run.investigationId,
       from: run.id,
       to: obsId,
       kind: 'produced_by_replay',
@@ -86,6 +90,8 @@ export function createReplayEvidenceNodes(run: ReplayRun): {
   // Link back to original investigation
   if (run.investigationId) {
     edges.push({
+      id: `${run.investigationId}|replay_observed|${run.id}`,
+      investigationId: run.investigationId,
       from: run.investigationId,
       to: run.id,
       kind: 'replay_observed',

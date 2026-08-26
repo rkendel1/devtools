@@ -52,11 +52,14 @@ export interface TaskExecutionContext {
 }
 
 export class SelectionTaskManager {
+  private client: FeltDBWorkspaceClient
   private state: TaskState = 'IDLE'
   private context: TaskExecutionContext | null = null
   private listeners: Array<(state: TaskState, context: TaskExecutionContext | null) => void> = []
 
-  constructor(private client: FeltDBWorkspaceClient) {}
+  constructor(client: FeltDBWorkspaceClient) {
+    this.client = client
+  }
 
   /**
    * Lifecycle: Start selection mode

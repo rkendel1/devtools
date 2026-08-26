@@ -132,21 +132,28 @@ export class ReplayEngine {
   }
 
   private buildOutcomeSignature(): OutcomeSignature {
+    type CapturedEvent = {
+      method?: string; url?: string; status?: number; statusText?: string
+      headers?: Record<string, string>; requestTime?: number; responseTime?: number
+      source?: 'console.error' | 'runtime.error'; message?: string; fingerprint?: string
+    }
+    const eventOf = (observation: ReplayObservation): CapturedEvent =>
+      (observation.details?.event ?? {}) as CapturedEvent
     // Extract target request observation
     const targetObservation = this.observations.find(
       (o) =>
         (o.type === 'event' || o.type === 'target_request') &&
-        o.details?.event?.method === this.fixture.target.requestMethod &&
-        o.details?.event?.url === this.fixture.target.requestUrl
+        eventOf(o).method === this.fixture.target.requestMethod &&
+        eventOf(o).url === this.fixture.target.requestUrl
     )
 
     const targetRequest = targetObservation?.details?.event as any
 
     // Collect runtime errors
     const errorObservations = this.observations.filter(
-      (o) => (o.type === 'event' || o.type === 'runtime_error') && o.details?.event?.fingerprint
+      (o) => (o.type === 'event' || o.type === 'runtime_error') && eventOf(o).fingerprint
     )
-    const errorFingerprints = errorObservations.map((o) => o.details?.event?.fingerprint || '')
+    const errorFingerprints = errorObservations.map((o) => eventOf(o).fingerprint || '')
 
     const status = targetRequest?.status || 0
     const statusText = targetRequest?.statusText || 'UNKNOWN'
@@ -187,9 +194,9 @@ export class ReplayEngine {
       errorFingerprints,
       errorCount: errorFingerprints.length,
       relevantRuntimeEvents: errorObservations.map((o) => ({
-        type: o.details?.event?.source || 'console.error',
-        message: o.details?.event?.message || '',
-        fingerprint: o.details?.event?.fingerprint || '',
+        type: eventOf(o).source || 'console.error',
+        message: eventOf(o).message || '',
+        fingerprint: eventOf(o).fingerprint || '',
       })),
       timing,
       causalEvidence: this.fixture.evidenceRefs.investigationNodeId ? [this.fixture.evidenceRefs.investigationNodeId] : [],

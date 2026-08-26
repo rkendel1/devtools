@@ -8,6 +8,7 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
+      '@feltdb/development-runtime': path.resolve(rootDir, 'packages/development-runtime/src/index.ts'),
       'runtime_investigator_wasm': path.resolve(rootDir, 'wasm-engine/pkg'),
       'module': path.resolve(rootDir, 'src/shims/module.ts'),
     },
