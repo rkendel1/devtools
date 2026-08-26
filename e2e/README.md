@@ -147,35 +147,88 @@ Browser-specific details (MV3 vs WebExtension vs Safari) don't matter—the work
 - **WebKit**: Storage operations work, DOM queries work, no extension
 - **Safari**: Web Extension loads, receives messages, stores data
 
-## Firefox Certification Gate (PR 4.14.2)
+## Firefox Certification Gate (PR 4.14.3: Full Round Trip)
 
-This is the real Firefox E2E. Do not move to WebKit/Safari until this passes:
+**This is the real Firefox E2E. Nothing moves to WebKit/Safari until this passes completely.**
 
-1. ✓ Extension bootstrap listener wired (`src/background.ts`)
-2. ✓ Vite builds background.ts as ESM module
-3. 🔄 Firefox E2E sends bootstrap message and waits for connection
-4. 🔄 Verify connection works by publishing to FeltDB
-5. 🔄 Run full workflow:
-   - SELECT element
-   - PUBLISH selection to FeltDB
-   - CREATE task in workspace
-   - RECEIVE code change from FeltDB
-   - VERIFY change
-   - PUBLISH verification result
-   - Assert final state from FeltDB
+The test proves Firefox can participate in the exact same workspace protocol as Chrome **without modifying DevelopmentRuntime, Chromium adapter, or FeltDB protocol**.
 
-When all steps pass:
-```bash
-npm run test:e2e:firefox
+### Full Round Trip (PR 4.14.3)
+
 ```
-is the canonical Firefox certification. Move to WebKit only after this passes automated and manual modes.
+Real Firefox Extension
+        │
+        │ privileged bootstrap (pairing code)
+        ▼
+connectDevelopmentWorkspace(pairingCode)
+        │
+        ▼ (production connection path)
+        │
+   FeltDB Development Workspace
+        ▲                    │
+        │                    │
+   publish()             subscription
+        │                    ▼
+   Selection ←────── CodeChange
+        │
+        ▼
+  runtime.verify()
+        │
+        ▼
+VerificationResult → FeltDB
+```
 
-## Future Work
+### Certification Checklist
 
-1. 🔄 Firefox full canonical workflow (bootstrap + SELECT→PUBLISH→VERIFY)
-2. WebKit runtime coverage (after Firefox passes)
-3. Safari Web Extension packaging and signing (after WebKit passes)
-4. Cross-browser workspace coordination (v4.16):
+Each step must prove the round trip is real (not mocked):
+
+- [x] Firefox extension loads
+- [ ] Privileged bootstrap message sent
+- [ ] Extension calls production `connectDevelopmentWorkspace(pairingCode)`
+- [ ] Real FeltDB workspace reached
+- [ ] Selection: Real DOM metrics captured
+- [ ] Selection: Published to workspace, **queryable from FeltDB**
+- [ ] Task: Created in workspace, **exists in FeltDB**
+- [ ] CodeChange: Published from test side, **received by extension via subscription**
+- [ ] Verification: Real `runtime.verify()` executed
+- [ ] Verification: Result persisted in workspace, **queryable from FeltDB**
+
+### Critical Constraints
+
+If Firefox E2E requires ANY of these, **STOP**—it's an abstraction problem:
+- ❌ DevelopmentRuntime modified
+- ❌ Chromium adapter modified
+- ❌ FeltDB protocol modified
+
+Firefox must work with the exact same code as Chrome.
+
+### Usage
+
+```bash
+npm run test:e2e:firefox         # automated (CI)
+MANUAL=1 npm run test:e2e:firefox # interactive (inspection/demo)
+```
+
+Once this passes completely, Safari becomes the final proof: can a third browser join the exact same protocol without any upstream changes?
+
+## Implementation Order
+
+1. **🚧 PR 4.14.3: Firefox Full Workspace E2E**
+   - Wire browser.runtime.sendMessage bootstrap
+   - Implement real workspace client integration
+   - Verify each step via FeltDB query
+   - Prove no upstream changes needed
+   - **Do not proceed until fully passing**
+
+2. **WebKit runtime coverage** (only after Firefox passes)
+   - Playwright WebKit browser testing
+   - Note: Tests runtime, not Safari Web Extensions
+
+3. **Safari Web Extension** (only after WebKit passes)
+   - macOS-only, requires Safari extension packaging
+   - Must pass the exact same Firefox certification flow
+
+4. **Cross-browser workspace coordination (v4.16)** (after all pass):
    ```
    Chrome SELECT
        ↓
