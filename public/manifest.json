@@ -5,8 +5,7 @@
   "version": "0.1.0",
   "devtools_page": "devtools.html",
   "background": {
-    "service_worker": "background.js",
-    "type": "module"
+    "service_worker": "background.js"
   },
   "permissions": ["storage", "scripting", "activeTab", "offscreen", "unlimitedStorage", "clipboardWrite"],
   "host_permissions": ["<all_urls>"],
