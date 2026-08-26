@@ -11,6 +11,11 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:e2e:chrome": "pnpm run build && node e2e/chrome-real.mjs",
+    "test:e2e:firefox": "pnpm run build && node e2e/firefox-real.mjs",
+    "test:e2e:firefox:headed": "pnpm run build && HEADED=1 node e2e/firefox-real.mjs",
+    "test:e2e:webkit": "pnpm run build && node e2e/webkit-real.mjs",
+    "test:e2e:safari": "pnpm run build && node e2e/safari-real.mjs",
+    "test:e2e:all": "pnpm run test:e2e:chrome && pnpm run test:e2e:firefox && pnpm run test:e2e:webkit",
     "test:watch": "vitest",
     "demo": "node --loader ts-node/esm demo/demo.ts"
   },
@@ -22,6 +27,7 @@
     "react-dom": "^19.2.8"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@types/chrome": "^0.2.7",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.18",

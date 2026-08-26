@@ -19,6 +19,10 @@ export default defineConfig({
         panel: path.resolve(rootDir, 'panel.html'),
         devtools: path.resolve(rootDir, 'devtools.html'),
         offscreen: path.resolve(rootDir, 'offscreen.html'),
+        background: path.resolve(rootDir, 'src/background.ts'),
+      },
+      output: {
+        entryFileNames: '[name].js',
       },
     },
   },
