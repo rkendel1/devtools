@@ -33,15 +33,40 @@ npm run test:e2e:chrome
 - Verifies: 422 error → service worker → session storage
 - Status: **PASSING**
 
-### Firefox (Planned)
+### Firefox (🚧 PR 4.14.2: Privileged Bootstrap)
 ```bash
-npm run test:e2e:firefox          # headless
-npm run test:e2e:firefox:headed   # visible browser
+npm run test:e2e:firefox          # headless (automated)
+npm run test:e2e:firefox:headed   # visible browser (manual mode)
+MANUAL=1 npm run test:e2e:firefox # interactive with pauses
 ```
 - Real Firefox browser
 - Temporary WebExtension addon
-- Verifies: canonical workflow (select → capture → publish → receive → verify)
-- Status: **IN DEVELOPMENT**
+- Real FeltDB workspace connection (via bootstrap)
+- Verifies: full canonical workflow with real FeltDB I/O
+- Status: **BOOTSTRAPPING**
+
+**Bootstrap Flow (privileged):**
+```
+Test starts FeltDB
+  ↓
+Test extracts pairing code
+  ↓
+Test launches Firefox + extension
+  ↓
+Test sends: browser.runtime.sendMessage({
+  type: 'feltdb:test-bootstrap',
+  pairingCode: 'FELT-...',
+  workspaceId: 'ws_...'
+})
+  ↓
+Extension background script receives message
+  ↓
+Extension calls: connectDevelopmentWorkspace(pairingCode)
+  ↓
+Real FeltDB workspace is reached
+```
+
+The extension uses **production `connectDevelopmentWorkspace()`**—no test variants.
 
 ### WebKit Runtime (Planned)
 ```bash
@@ -122,11 +147,34 @@ Browser-specific details (MV3 vs WebExtension vs Safari) don't matter—the work
 - **WebKit**: Storage operations work, DOM queries work, no extension
 - **Safari**: Web Extension loads, receives messages, stores data
 
+## Firefox Certification Gate (PR 4.14.2)
+
+This is the real Firefox E2E. Do not move to WebKit/Safari until this passes:
+
+1. ✓ Extension bootstrap listener wired (`src/background.ts`)
+2. ✓ Vite builds background.ts as ESM module
+3. 🔄 Firefox E2E sends bootstrap message and waits for connection
+4. 🔄 Verify connection works by publishing to FeltDB
+5. 🔄 Run full workflow:
+   - SELECT element
+   - PUBLISH selection to FeltDB
+   - CREATE task in workspace
+   - RECEIVE code change from FeltDB
+   - VERIFY change
+   - PUBLISH verification result
+   - Assert final state from FeltDB
+
+When all steps pass:
+```bash
+npm run test:e2e:firefox
+```
+is the canonical Firefox certification. Move to WebKit only after this passes automated and manual modes.
+
 ## Future Work
 
-1. Firefox canonical workflow (currently 422 regression only)
-2. WebKit runtime coverage
-3. Safari Web Extension packaging and signing
+1. 🔄 Firefox full canonical workflow (bootstrap + SELECT→PUBLISH→VERIFY)
+2. WebKit runtime coverage (after Firefox passes)
+3. Safari Web Extension packaging and signing (after WebKit passes)
 4. Cross-browser workspace coordination (v4.16):
    ```
    Chrome SELECT
