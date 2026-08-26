@@ -1,0 +1,1 @@
+export { createFirefoxAdapter } from './adapter'

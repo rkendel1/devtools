@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Firefox Adapter Smoke Test Fixture</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      padding: 40px 20px;
+      background: #f5f5f5;
+    }
+
+    h1 {
+      font-size: 24px;
+      margin-bottom: 20px;
+      color: #333;
+    }
+
+    #test-button {
+      /* INITIAL STATE: 400 × 48 */
+      width: 400px;
+      height: 48px;
+      padding: 0;
+      font-size: 16px;
+      font-weight: 600;
+      background-color: #3b82f6;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: width 0.3s, height 0.3s;
+      display: block;
+      margin: 20px 0;
+      visibility: visible;
+    }
+
+    #test-button:hover {
+      background-color: #2563eb;
+    }
+
+    #test-button.changed {
+      /* CHANGED STATE: 200 × 24 */
+      width: 200px;
+      height: 24px;
+    }
+
+    #status {
+      margin-top: 20px;
+      padding: 10px;
+      background: white;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+
+    #metrics {
+      margin-top: 10px;
+      padding: 10px;
+      background: #f9f9f9;
+      border: 1px solid #eee;
+      border-radius: 4px;
+      font-size: 12px;
+      font-family: monospace;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+  </style>
+</head>
+<body>
+  <h1>Firefox Adapter Smoke Test</h1>
+  <button id="test-button">Click to Select</button>
+
+  <div id="status">
+    Ready. Initial state: width=400 height=48
+  </div>
+
+  <div id="metrics"></div>
+
+  <script>
+    const button = document.getElementById('test-button');
+    const statusDiv = document.getElementById('status');
+    const metricsDiv = document.getElementById('metrics');
+
+    // Expose for WebDriver to call
+    window.testFixture = {
+      // Get current button metrics
+      getMetrics() {
+        const rect = button.getBoundingClientRect();
+        return {
+          width: Math.round(rect.width),
+          height: Math.round(rect.height),
+          x: Math.round(rect.left),
+          y: Math.round(rect.top),
+          display: window.getComputedStyle(button).display,
+          visibility: window.getComputedStyle(button).visibility,
+        };
+      },
+
+      // Initial state: 400 × 48
+      getInitialMetrics() {
+        return {
+          width: 400,
+          height: 48,
+          display: 'block',
+          visibility: 'visible',
+        };
+      },
+
+      // Apply change: 200 × 24
+      applyChange() {
+        button.classList.add('changed');
+        statusDiv.textContent = 'Changed. New state: width=200 height=24';
+        return this.getMetrics();
+      },
+
+      // Verify both states exist
+      verifyStates() {
+        const before = {
+          width: 400,
+          height: 48,
+        };
+        const after = {
+          width: 200,
+          height: 24,
+        };
+        const current = this.getMetrics();
+        return {
+          before,
+          after,
+          current,
+          stateChanged: current.width !== before.width || current.height !== before.height,
+        };
+      },
+    };
+
+    // Log metrics when clicked
+    button.addEventListener('click', (e) => {
+      e.preventDefault();
+      const metrics = window.testFixture.getMetrics();
+      statusDiv.textContent = 'Selected. Metrics: ' + JSON.stringify(metrics);
+      metricsDiv.textContent = JSON.stringify(metrics, null, 2);
+    });
+
+    // Report page ready
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', () => {
+        window.testFixture.ready = true;
+      });
+    } else {
+      window.testFixture.ready = true;
+    }
+  </script>
+</body>
+</html>

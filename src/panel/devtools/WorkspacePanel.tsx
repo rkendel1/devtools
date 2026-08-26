@@ -3,12 +3,18 @@
  *
  * DevTools interface for Runtime Investigator as a FeltDB Development Workspace client.
  * Shows workspace status, connected clients, and enables Select → Describe → Change → Verify workflow.
+ *
+ * Now uses @feltdb/development-runtime to handle browser interaction.
+ * DevTools orchestrates: workspace coordination + user experience.
+ * Runtime handles: browser interaction (select, verify).
  */
 
 import React, { useEffect, useState } from 'react'
 import type { DevToolsWorkspaceStatus } from './workspaceClient'
 import { DevToolsWorkspaceClient } from './workspaceClient'
 import type { VisualSelection, CodeChange, VerificationResult } from '@feltdb/core/workspace'
+import { DevelopmentRuntime, createChromiumAdapter } from '@feltdb/development-runtime'
+import type { VerificationOutcome } from '@feltdb/development-runtime'
 import { SelectionModeUI } from './components/SelectionModeUI'
 import { TaskDisplay } from './components/TaskDisplay'
 import { VerificationPanel } from './components/VerificationPanel'
@@ -28,6 +34,9 @@ export const WorkspacePanel: React.FC<WorkspacePanelProps> = ({
   projectName,
 }) => {
   const [client] = useState(() => new DevToolsWorkspaceClient())
+  const [runtime] = useState(() => new DevelopmentRuntime({
+    browserAdapter: createChromiumAdapter(),
+  }))
   const [status, setStatus] = useState<DevToolsWorkspaceStatus>({ connected: false, clientsConnected: [] })
   const [phase, setPhase] = useState<PanelPhase>('idle')
 
@@ -69,8 +78,9 @@ export const WorkspacePanel: React.FC<WorkspacePanelProps> = ({
 
     return () => {
       client.disconnect()
+      void runtime.disconnect()
     }
-  }, [workspace, workspaceId, projectName, currentTask?.id])
+  }, [workspace, workspaceId, projectName, currentTask?.id, client, runtime])
 
   const handleSelectionCaptured = (sel: VisualSelection) => {
     setSelection(sel)
@@ -108,18 +118,30 @@ export const WorkspacePanel: React.FC<WorkspacePanelProps> = ({
     }
   }
 
-  const handleVerifyChange = () => {
-    if (!detectedChange) {
-      setMessage('No change to verify')
+  const handleVerifyChange = async () => {
+    if (!detectedChange || !selection) {
+      setMessage('No change or selection to verify')
       return
     }
 
     setPhase('verifying')
     setMessage('Verifying change...')
 
-    // Verification would happen here
-    // For now, simulate verification success
-    setTimeout(() => {
+    try {
+      // Use DevelopmentRuntime to verify the change
+      // Runtime handles: page readiness, element capture, metrics comparison
+      const outcome: VerificationOutcome = await runtime.verify({
+        selection: {
+          elementQuery: selection.selector,
+          boundingBox: selection.boundingBox,
+          sourceHints: {
+            sourceLocations: selection.sourceHints || [],
+          },
+        },
+        change: detectedChange,
+      })
+
+      // Convert runtime VerificationOutcome to workspace VerificationResult
       const result: VerificationResult = {
         id: `result:${Date.now()}`,
         workspaceId,
@@ -128,20 +150,23 @@ export const WorkspacePanel: React.FC<WorkspacePanelProps> = ({
         verificationRunId: `verify:${Date.now()}`,
         investigationId: '',
         kind: 'verification_result',
-        status: 'FIXED',
-        confidence: 0.95,
+        status: outcome.status,
+        confidence: outcome.confidence,
         originalOutcome: 200,
         newOutcome: 200,
         newErrors: [],
         createdAt: Date.now(),
-        evidence: [],
+        evidence: outcome.evidence.domChanges || [],
       }
 
       client.publishVerificationResult(result)
       setVerificationResult(result)
-      setPhase('verified')
-      setMessage('✓ FIX VERIFIED')
-    }, 1500)
+      setPhase(outcome.status === 'FIXED' ? 'verified' : 'idle')
+      setMessage(outcome.status === 'FIXED' ? '✓ FIX VERIFIED' : 'Verification failed')
+    } catch (error) {
+      setMessage(`Verification error: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      setPhase('idle')
+    }
   }
 
   const handleReset = () => {
@@ -166,6 +191,7 @@ export const WorkspacePanel: React.FC<WorkspacePanelProps> = ({
         {phase === 'idle' && (
           <SelectionModeUI
             onSelectionCaptured={handleSelectionCaptured}
+            runtime={runtime}
           />
         )}
 
