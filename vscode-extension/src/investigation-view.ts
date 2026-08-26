@@ -2,14 +2,25 @@ import * as vscode from 'vscode'
 import type { InvestigationItem, RuntimeInvestigation } from './workspace-client.js'
 
 export class InvestigationView {
+  private static readonly panels = new Map<string, vscode.WebviewPanel>()
+
   static show(extensionUri: vscode.Uri, item: InvestigationItem): void {
+    const existing = this.panels.get(item.entityId)
+    if (existing) { existing.webview.html = renderInvestigation(existing.webview, item); existing.reveal(); return }
     const panel = createPanel('feltdb.investigation', 'Runtime Investigation', extensionUri)
+    this.panels.set(item.entityId, panel)
+    panel.onDidDispose(() => this.panels.delete(item.entityId))
     panel.webview.html = renderInvestigation(panel.webview, item)
     panel.webview.onDidReceiveMessage((message: { command?: string }) => {
       const commands: Record<string, string> = { openSource: 'feltdb.showSource', viewTrace: 'feltdb.viewTrace', compare: 'feltdb.compareInvestigation', investigate: 'feltdb.investigateRuntimeIssue' }
       const command = message.command ? commands[message.command] : undefined
       if (command) void vscode.commands.executeCommand(command, item)
     })
+  }
+
+  static update(item: InvestigationItem): void {
+    const panel = this.panels.get(item.entityId)
+    if (panel) panel.webview.html = renderInvestigation(panel.webview, item)
   }
 
   static showTrace(extensionUri: vscode.Uri, item: InvestigationItem): void {
@@ -42,6 +53,8 @@ function renderInvestigation(webview: vscode.Webview, item: InvestigationItem): 
   ${section('Diagnosis', `<p>${escape(value.result.diagnosis)}</p><p><strong>Confidence: ${Math.round(value.result.confidence * 100)}%</strong></p>`)}
   ${section('Observed Evidence', list(value.result.evidence))}
   ${section('Environment', `<div class="grid"><span class="label">Page</span><span>${escape(environment?.pageUrl ?? 'Unknown')}</span><span class="label">Browser</span><span>${escape(browserName(environment?.userAgent))}</span><span class="label">Viewport</span><span>${escape(environment?.viewport ?? 'Unknown')}</span></div>`)}
+  ${renderDevelopmentActivity(item)}
+  ${item.envelope.verifications?.length ? section('Browser Verification', list(item.envelope.verifications.map((verification) => `${verification.outcome}: HTTP ${verification.status} ${verification.statusText ?? ''}`))) : ''}
   <div class="actionbar"><button data-command="openSource">Open Source</button><button data-command="viewTrace">View Trace</button><button data-command="compare">Compare</button><button data-command="investigate">Investigate</button></div>
   <p class="identity">FeltDB entity: ${escape(item.entityId)}</p>
   <script nonce="${nonce}">const vscode=acquireVsCodeApi();document.querySelectorAll('[data-command]').forEach(button=>button.addEventListener('click',()=>vscode.postMessage({command:button.dataset.command})));</script>
@@ -62,6 +75,14 @@ function renderComparison(value: RuntimeInvestigation): string {
   if (!comparison?.previousSuccess && !comparison?.semanticDiff?.length) return '<p>No comparable successful observation is available.</p>'
   const request = value.graph.request
   return `<h2>Previous observation</h2><p>Successful observation data captured by FeltDB</p>${data(comparison.previousSuccess)}<hr><h2>Current observation</h2><p><strong>${escape(request.method)} ${escape(request.url)}</strong><br>Status ${request.status} ${escape(value.graph.response?.statusText ?? '')}</p>${data(comparison.current)}<hr><h2>Difference</h2>${comparison.semanticDiff?.length ? list(comparison.semanticDiff.map((difference) => `⚠ ${difference}`)) : '<p>No persisted semantic differences.</p>'}`
+}
+
+function renderDevelopmentActivity(item: InvestigationItem): string {
+  const activity = item.envelope.developmentActivity ?? []
+  if (!activity.length) return ''
+  const files = [...new Set(activity.flatMap((entry) => entry.changedFiles.map((file) => file.path)))]
+  const git = activity.at(-1)?.git
+  return section('Development Activity', `${list(files.map((file) => `Changed: ${file}`))}${git ? `<div class="grid"><span class="label">Branch</span><span>${escape(git.branch ?? 'Unknown')}</span><span class="label">Commit</span><code>${escape(git.commit?.slice(0, 12) ?? 'Uncommitted')}</code><span class="label">Author</span><span>${escape(git.author ?? 'Unknown')}</span></div>${git.diffStat ? `<pre>${escape(git.diffStat)}</pre>` : ''}` : '<p>Git metadata unavailable.</p>'}`)
 }
 
 function data(value: unknown): string { return value == null ? '<p>No payload data persisted.</p>' : `<pre>${escape(JSON.stringify(value, null, 2))}</pre>` }

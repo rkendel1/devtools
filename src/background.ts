@@ -7,7 +7,7 @@
  * - Message routing to content scripts and offscreen documents
  */
 
-import { connectDevelopmentWorkspace, resolvePairingCode } from '@feltdb/core/workspace'
+import { connectDevelopmentWorkspace } from '@feltdb/core/workspace'
 
 type RuntimeMessage = {
   type: string
@@ -90,18 +90,11 @@ async function handleFeltDBBootstrap(message: RuntimeMessage): Promise<Workspace
 
   try {
     const pairingCode = message.pairingCode.toUpperCase()
-    // Resolve independently as proof that the human-facing token went through
-    // FeltDB's production discovery path. Never treat it as a workspace ID.
-    const resolution = await resolvePairingCode(pairingCode)
     const workspace = await connectDevelopmentWorkspace({
       pairingCode,
-      clientId: 'firefox-extension',
+      clientId: `browser-extension-${chrome.runtime.id.slice(0, 12)}`,
       clientType: 'browser',
     })
-    if (workspace.workspaceId !== resolution.workspaceId) {
-      throw new Error('PAIRING_RESOLUTION_MISMATCH')
-    }
-    await workspace.connect()
 
     // Store connection in extension state
     extensionWorkspace = {
@@ -120,7 +113,12 @@ async function handleFeltDBBootstrap(message: RuntimeMessage): Promise<Workspace
     }
   } catch (error) {
     console.error('[Runtime Investigator] Connection failed', error)
-    return { ok: false, error: error instanceof Error ? error.message : String(error) }
+    const detail = error instanceof Error ? error.message : String(error)
+    const pairingCode = String(message.pairingCode).trim().toUpperCase()
+    const friendly = /not found|expired|404/i.test(detail)
+      ? `Pairing code ${pairingCode} was not found or has expired. Use the current code displayed by \`feltdb dev\`.`
+      : detail
+    return { ok: false, error: friendly }
   }
 }
 
@@ -134,6 +132,19 @@ async function handleInvestigationHandoff(message: RuntimeMessage): Promise<Inve
   }
 
   try {
+    const incoming = message.investigation as { graph?: { request?: { method?: string; url?: string; status?: number }; response?: { statusText?: string } } }
+    const request = incoming.graph?.request
+    const active = request?.method && request.url
+      ? (await connection.query('runtime_investigations'))
+          .filter((candidate: any) =>
+            ['INVESTIGATING', 'VERIFYING'].includes(candidate?.lifecycle)
+            && candidate?.developmentActivity?.length > 0
+            && candidate?.investigation?.graph?.request?.method === request.method
+            && requestFingerprint(candidate?.investigation?.graph?.request?.url) === requestFingerprint(request.url)
+            && isFailedStatus(candidate?.investigation?.graph?.request?.status)
+            && Date.now() - latestDevelopmentAt(candidate) < 60 * 60 * 1000)
+          .sort((a: any, b: any) => latestDevelopmentAt(b) - latestDevelopmentAt(a))[0]
+      : undefined
     const envelope = {
       kind: 'runtime_investigation',
       schemaVersion: 1,
@@ -145,17 +156,45 @@ async function handleInvestigationHandoff(message: RuntimeMessage): Promise<Inve
         product: 'chrome-runtime-investigator',
       },
       sentAt: Date.now(),
+      delivery: message.type === 'runtime-investigator:send-to-ide' ? 'manual' : 'automatic',
       investigation: structuredClone(message.investigation),
+      ...(active?.entityId ? { verificationOf: active.entityId } : {}),
     }
     const entityId = await connection.publish('runtime_investigations', envelope)
     // FeltDB assigns the durable identity. Persist it back onto the same entity so
     // clients that reconnect and query retain that identity, not a local surrogate.
     await connection.update('runtime_investigations', entityId, { entityId })
+    if (active?.entityId && request) {
+      const fixed = request.status != null && request.status > 0 && request.status < 400
+      const verification = {
+        entityId,
+        observedAt: Date.now(),
+        status: request.status ?? 0,
+        statusText: incoming.graph?.response?.statusText,
+        outcome: fixed ? 'FIXED' : 'NOT_FIXED',
+      }
+      await connection.update('runtime_investigations', active.entityId, {
+        lifecycle: fixed ? 'RESOLVED' : 'VERIFYING',
+        verifications: [...(active.verifications ?? []), verification],
+      })
+    }
     return { ok: true, entityId, workspaceId: extensionWorkspace.workspaceId }
   } catch (error) {
     console.error('[Runtime Investigator] Investigation handoff failed', error)
     return { ok: false, error: error instanceof Error ? error.message : String(error) }
   }
+}
+
+function requestFingerprint(url: unknown): string {
+  if (typeof url !== 'string') return ''
+  try { const parsed = new URL(url); return `${parsed.origin}${parsed.pathname}` } catch { return url.split('?')[0] }
+}
+
+function isFailedStatus(status: unknown): boolean { return typeof status === 'number' && (status === 0 || status >= 400) }
+
+function latestDevelopmentAt(candidate: any): number {
+  const activity = candidate?.developmentActivity
+  return Array.isArray(activity) && activity.length ? Number(activity[activity.length - 1]?.observedAt ?? 0) : 0
 }
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -179,6 +218,13 @@ chrome.runtime.onMessage.addListener(
     }
 
     if (message?.type === 'runtime-investigator:send-to-ide') {
+      void handleInvestigationHandoff(message).then(sendResponse).catch((error) => {
+        sendResponse({ ok: false, error: String(error) })
+      })
+      return true
+    }
+
+    if (message?.type === 'runtime-investigator:observe') {
       void handleInvestigationHandoff(message).then(sendResponse).catch((error) => {
         sendResponse({ ok: false, error: String(error) })
       })

@@ -120,6 +120,7 @@ export default function App() {
       const errorMessage = error instanceof Error ? error.message : 'Failed to connect to workspace'
       setWorkspaceError(errorMessage)
       setMessage(`Workspace connection failed: ${errorMessage}`)
+      throw error
     } finally {
       setWorkspaceLoading(false)
     }
@@ -182,6 +183,9 @@ export default function App() {
       historyRef.current = next
       setHistory(next)
       setInvestigation(record)
+      if (workspaceConnected) {
+        void chrome.runtime.sendMessage({ type: 'runtime-investigator:observe', investigation: record }).catch(() => undefined)
+      }
       setMessage(automatic ? `Automatically investigated ${request.status} ${request.url}` : 'Investigation complete.')
     } catch (error) {
       setMessage(`Investigation failed: ${String(error)}`)

@@ -41,10 +41,13 @@ export function registerCommands(context: vscode.ExtensionContext, client: FeltW
     const item = resolveItem(value, provider)
     if (!item) return void vscode.window.showWarningMessage('Select a runtime investigation first.')
     const location = sourceLocation(item.envelope.investigation)
-    const requestSource = location ? undefined : await resolveRequestedSource(item.envelope.investigation.graph.request.url)
-    if (!location && !requestSource) return void vscode.window.showWarningMessage('Source location unavailable\nThe runtime investigation did not identify an exact local source file.', { modal: true })
-    const uri = requestSource ?? await resolveSourceUri(location!.source)
-    if (!uri) return void showResolutionError(location!.source)
+    const exactSource = location ? await resolveSourceUri(location.source) : undefined
+    const requestSource = exactSource ? undefined : await resolveRequestedSource(item.envelope.investigation.graph.request.url)
+    if (!exactSource && !requestSource) {
+      if (location) return void showResolutionError(location.source)
+      return void vscode.window.showWarningMessage('Source location unavailable\nThe runtime investigation did not identify an exact local source file.', { modal: true })
+    }
+    const uri = exactSource ?? requestSource!
     const document = await vscode.workspace.openTextDocument(uri)
     const editor = await vscode.window.showTextDocument(document)
     const line = Math.max(0, Math.min(document.lineCount - 1, (location?.line ?? 1) - 1))
@@ -122,7 +125,9 @@ async function connectWithCode(pairingCode: string, context: vscode.ExtensionCon
       await provider.refresh()
     })
     await vscode.commands.executeCommand('setContext', 'feltdb.connected', true)
-    if (showErrors) void vscode.window.showInformationMessage(`Connected to FeltDB workspace ${client.workspaceId}`)
+    if (showErrors) void vscode.window.showInformationMessage(`Connected to FeltDB workspace ${client.workspaceId}`, 'Open Investigations').then((choice) => {
+      if (choice === 'Open Investigations') void vscode.commands.executeCommand('feltdb.runtimeInvestigations.focus')
+    })
   } catch (error) {
     try { await client.disconnect() } catch { /* Preserve the original connection error. */ }
     await vscode.commands.executeCommand('setContext', 'feltdb.connected', false)
@@ -245,7 +250,9 @@ The diagnosis is an inference, not an established fact. Determine the actual cau
 Your job:
 Investigate this runtime observation. Determine whether it represents an actual defect, identify the most likely root cause, inspect the relevant source, and propose a fix. Do not modify files yet.
 
-Respond with these sections: Finding, Evidence, Relevant source, Recommended change, and Confidence.`
+Respond with these sections: Finding, Evidence, Relevant source, Recommended change, and Confidence.
+
+FeltDB observes workspace changes independently. Follow the active agent's normal permission model; no FeltDB-specific response or tool call is required.`
 }
 
 function formatLines(lines: string[]): string { return lines.length ? lines.map((line) => `- ${line}`).join('\n') : '- None recorded' }

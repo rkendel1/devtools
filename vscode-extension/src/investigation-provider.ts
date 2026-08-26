@@ -1,5 +1,6 @@
 import * as vscode from 'vscode'
 import type { FeltWorkspaceClient, InvestigationItem } from './workspace-client.js'
+import { InvestigationView } from './investigation-view.js'
 
 export class InvestigationTreeItem extends vscode.TreeItem {
   constructor(readonly item: InvestigationItem) {
@@ -17,7 +18,9 @@ export class InvestigationTreeItem extends vscode.TreeItem {
     ].join('\n'))
     this.iconPath = new vscode.ThemeIcon(request.status >= 400 ? 'error' : 'search')
     this.contextValue = 'runtimeInvestigation'
-    this.command = { command: 'feltdb.openInvestigation', title: 'Open Investigation', arguments: [item] }
+    const sourceBacked = hasSourceCandidate(item)
+    if (sourceBacked) this.iconPath = new vscode.ThemeIcon('file-code')
+    this.command = { command: sourceBacked ? 'feltdb.showSource' : 'feltdb.openInvestigation', title: sourceBacked ? 'Open Source' : 'Open Investigation', arguments: [item] }
   }
 }
 
@@ -27,16 +30,27 @@ export class InvestigationProvider implements vscode.TreeDataProvider<FeltTreeIt
   private readonly changed = new vscode.EventEmitter<void>()
   readonly onDidChangeTreeData = this.changed.event
   private readonly items = new Map<string, InvestigationItem>()
+  private readonly notifiedEntities = new Set<string>()
   private readonly subscriptions: vscode.Disposable[]
   private selectedItem: InvestigationItem | undefined
 
   constructor(private readonly client: FeltWorkspaceClient) {
     this.subscriptions = [client.onInvestigation((item) => {
+      const previous = this.items.get(item.envelope.investigation.id)
       this.items.set(item.envelope.investigation.id, item)
       this.changed.fire()
-      void vscode.window.showInformationMessage(`FeltDB investigation received: ${summary(item)}`, 'Open').then((choice) => {
-        if (choice === 'Open') void vscode.commands.executeCommand('feltdb.openInvestigation', item)
+      InvestigationView.update(item)
+      if (previous?.envelope.lifecycle !== 'RESOLVED' && item.envelope.lifecycle === 'RESOLVED') {
+        void vscode.window.showInformationMessage(`FeltDB investigation resolved and verified in browser: ${summary(item)}`, 'Open').then((choice) => {
+          if (choice === 'Open') void vscode.commands.executeCommand('feltdb.openInvestigation', item)
+        })
+      } else if ((item.envelope.delivery === 'manual' || !previous) && !this.notifiedEntities.has(item.entityId)) {
+        this.notifiedEntities.add(item.entityId)
+        void vscode.window.showInformationMessage(`FeltDB investigation received: ${summary(item)}`, ...(hasSourceCandidate(item) ? ['Open Source', 'Open Investigation'] as const : ['Open Investigation'] as const)).then((choice) => {
+        if (choice === 'Open Source') void vscode.commands.executeCommand('feltdb.showSource', item)
+        if (choice === 'Open Investigation') void vscode.commands.executeCommand('feltdb.openInvestigation', item)
       })
+      }
     }), client.onConnectionChanged(() => this.changed.fire())]
   }
 
@@ -79,6 +93,7 @@ export class InvestigationProvider implements vscode.TreeDataProvider<FeltTreeIt
 
   select(item: InvestigationItem | undefined): void { this.selectedItem = item }
   selected(): InvestigationItem | undefined { return this.selectedItem }
+  findEntity(entityId: string): InvestigationItem | undefined { return [...this.items.values()].find((item) => item.entityId === entityId) }
   updated(item: InvestigationItem): void {
     this.items.set(item.envelope.investigation.id, item)
     this.changed.fire()
@@ -95,4 +110,10 @@ function requestPath(url: string): string {
 function summary(item: InvestigationItem): string {
   const request = item.envelope.investigation.graph.request
   return `${request.method} ${requestPath(request.url)} → ${request.status}`
+}
+
+function hasSourceCandidate(item: InvestigationItem): boolean {
+  const graph = item.envelope.investigation.graph
+  if (graph.initiator?.source || graph.trace?.some((step) => step.source)) return true
+  try { return /\.(?:[cm]?[jt]sx?|vue|svelte|astro|css|scss|less|html)$/i.test(new URL(graph.request.url).pathname) } catch { return false }
 }

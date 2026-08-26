@@ -32,13 +32,22 @@ export interface RuntimeInvestigationEnvelope {
   entityId?: string
   lifecycle: 'NEW' | 'INVESTIGATING' | 'PROPOSED' | 'APPLIED' | 'VERIFYING' | 'RESOLVED'
   sentAt: number
+  delivery?: 'manual' | 'automatic'
   source: { clientId: string; clientType: string; product: string }
   investigation: RuntimeInvestigation
+  developmentActivity?: DevelopmentActivity[]
+  verifications?: Array<{ entityId: string; observedAt: number; status: number; statusText?: string; outcome: 'FIXED' | 'NOT_FIXED' }>
 }
 
 export interface InvestigationItem {
   entityId: string
   envelope: RuntimeInvestigationEnvelope
+}
+
+export interface DevelopmentActivity {
+  observedAt: number
+  changedFiles: Array<{ path: string; change: 'created' | 'changed' | 'deleted' }>
+  git?: { branch?: string; commit?: string; author?: string; committedAt?: string; changedFiles?: string[]; diffStat?: string }
 }
 
 const COLLECTION = 'runtime_investigations'
@@ -49,12 +58,14 @@ export class FeltWorkspaceClient implements vscode.Disposable {
   private readonly emitter = new vscode.EventEmitter<InvestigationItem>()
   private readonly connectionEmitter = new vscode.EventEmitter<void>()
   private currentPairingCode: string | undefined
+  private activeItem: InvestigationItem | undefined
   readonly onInvestigation = this.emitter.event
   readonly onConnectionChanged = this.connectionEmitter.event
 
   get connected(): boolean { return Boolean(this.connection) }
   get workspaceId(): string | undefined { return this.connection?.workspaceId }
   get pairingCode(): string | undefined { return this.currentPairingCode }
+  get activeInvestigation(): InvestigationItem | undefined { return this.activeItem }
 
   async connect(pairingCode: string, projectDir?: string): Promise<void> {
     await this.disconnect()
@@ -78,7 +89,9 @@ export class FeltWorkspaceClient implements vscode.Disposable {
     this.currentPairingCode = pairingCode
     this.unsubscribe = connection.subscribe<RuntimeInvestigationEnvelope>(COLLECTION, (event) => {
       if (event.type === 'deleted' || !isEnvelope(event.value)) return
-      this.emitter.fire({ entityId: event.entityId, envelope: event.value })
+      const item = { entityId: event.entityId, envelope: event.value }
+      this.emitter.fire(item)
+      if (this.activeItem?.entityId === event.entityId) this.activeItem = item
     })
     this.connectionEmitter.fire()
   }
@@ -94,8 +107,22 @@ export class FeltWorkspaceClient implements vscode.Disposable {
 
   async markInvestigating(item: InvestigationItem): Promise<void> {
     if (!this.connection) throw new Error('Connect to a FeltDB development workspace first.')
+    if (!item.envelope.entityId) {
+      const entityId = await this.connection.publish<RuntimeInvestigationEnvelope>(COLLECTION, item.envelope)
+      await this.connection.update<RuntimeInvestigationEnvelope>(COLLECTION, entityId, { entityId })
+      item.entityId = entityId
+      item.envelope.entityId = entityId
+    }
     await this.connection.update<RuntimeInvestigationEnvelope>(COLLECTION, item.entityId, { lifecycle: 'INVESTIGATING' })
     item.envelope.lifecycle = 'INVESTIGATING'
+    this.activeItem = item
+  }
+
+  async recordDevelopmentActivity(item: InvestigationItem, activity: DevelopmentActivity): Promise<void> {
+    if (!this.connection) return
+    const developmentActivity = [...(item.envelope.developmentActivity ?? []), activity].slice(-50)
+    await this.connection.update<RuntimeInvestigationEnvelope>(COLLECTION, item.entityId, { developmentActivity })
+    item.envelope.developmentActivity = developmentActivity
   }
 
   async disconnect(): Promise<void> {
@@ -104,6 +131,7 @@ export class FeltWorkspaceClient implements vscode.Disposable {
     const connection = this.connection
     this.connection = undefined
     this.currentPairingCode = undefined
+    this.activeItem = undefined
     if (connection) await connection.disconnect()
     this.connectionEmitter.fire()
   }

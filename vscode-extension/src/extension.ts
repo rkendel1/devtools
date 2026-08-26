@@ -2,11 +2,13 @@ import * as vscode from 'vscode'
 import { registerCommands, restoreWorkspace } from './commands.js'
 import { InvestigationProvider, InvestigationTreeItem } from './investigation-provider.js'
 import { FeltWorkspaceClient } from './workspace-client.js'
+import { DevelopmentObserver } from './development-observer.js'
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const client = new FeltWorkspaceClient()
   const provider = new InvestigationProvider(client)
-  context.subscriptions.push(client, provider)
+  const developmentObserver = new DevelopmentObserver(client)
+  context.subscriptions.push(client, provider, developmentObserver)
   const tree = vscode.window.createTreeView('feltdb.runtimeInvestigations', { treeDataProvider: provider })
   context.subscriptions.push(tree)
   context.subscriptions.push(tree.onDidChangeSelection((event) => {
