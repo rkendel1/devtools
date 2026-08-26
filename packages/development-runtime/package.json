@@ -1,0 +1,55 @@
+{
+  "name": "@feltdb/development-runtime",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Browser runtime for FeltDB Development Workspace — SELECT → CAPTURE → VERIFY",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "capabilities": {
+    "chromium": "production",
+    "firefox": "not-implemented",
+    "webkit": "not-implemented"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./adapters/chromium": {
+      "import": "./dist/adapters/chromium/index.js",
+      "types": "./dist/adapters/chromium/index.d.ts"
+    },
+    "./adapters/firefox": {
+      "import": "./dist/adapters/firefox/index.js",
+      "types": "./dist/adapters/firefox/index.d.ts"
+    },
+    "./adapters/webkit": {
+      "import": "./dist/adapters/webkit/index.js",
+      "types": "./dist/adapters/webkit/index.d.ts"
+    }
+  },
+  "dependencies": {
+    "@feltdb/core": "^0.5.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "typescript": "~6.0.2",
+    "vitest": "^3.2.4"
+  },
+  "keywords": [
+    "feltdb",
+    "development-workspace",
+    "browser-runtime",
+    "element-selection",
+    "verification",
+    "debugging"
+  ]
+}
