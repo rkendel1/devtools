@@ -10,6 +10,7 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "test": "vitest run",
+    "test:e2e:chrome": "pnpm run build && node e2e/chrome-real.mjs",
     "test:watch": "vitest",
     "demo": "node --loader ts-node/esm demo/demo.ts"
   },
@@ -32,6 +33,7 @@
     "fake-indexeddb": "^6.2.4",
     "geckodriver": "^6.1.1",
     "oxlint": "^1.79.0",
+    "puppeteer-core": "^24.43.1",
     "typescript": "~6.0.2",
     "vite": "^8.2.2",
     "vitest": "^3.2.4",

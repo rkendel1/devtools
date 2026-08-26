@@ -85,8 +85,23 @@ class FeltRepository {
 
   subscribeHistory(callback: (records: InvestigationRecord[]) => void): () => void {
     if (typeof indexedDB === 'undefined') return () => undefined
-    this.ensure()
-    return this.histories!.subscribe((records) => callback(this.sort(records.map(stripDatabaseFields))))
+    let active = true
+    let running = false
+    const refresh = async () => {
+      if (!active || running) return
+      running = true
+      try {
+        const records = await this.readWithRecovery(() => this.histories!.all())
+        if (active) callback(this.sort(records.map(stripDatabaseFields)))
+      } catch (error) {
+        console.warn('[Runtime Investigator] History refresh failed', error)
+      } finally {
+        running = false
+      }
+    }
+    void refresh()
+    const timer = window.setInterval(() => void refresh(), 1000)
+    return () => { active = false; window.clearInterval(timer) }
   }
 
   syncHistory(records: InvestigationRecord[]): Promise<void> {
@@ -257,12 +272,43 @@ class FeltRepository {
   }
 
   subscribeNeighborhood(investigationId: string, callback: (value: EvidenceNeighborhood) => void): () => void {
+    let active = true
+    let running = false
+    const refresh = async () => {
+      if (!active || running) return
+      running = true
+      try {
+        const value = await this.readWithRecovery(() => this.getNeighborhood(investigationId, 4, 80))
+        if (active) callback(value)
+      } catch (error) {
+        console.warn('[Runtime Investigator] Evidence refresh failed', error)
+      } finally {
+        running = false
+      }
+    }
+    void refresh()
+    const timer = window.setInterval(() => void refresh(), 1000)
+    return () => { active = false; window.clearInterval(timer) }
+  }
+
+  private async readWithRecovery<T>(operation: () => Promise<T>): Promise<T> {
     this.ensure()
-    const refresh = () => void this.getNeighborhood(investigationId, 4, 80).then(callback)
-    const unsubscribeNodes = this.nodes!.subscribe(refresh)
-    const unsubscribeEdges = this.edges!.subscribe(refresh)
-    refresh()
-    return () => { unsubscribeNodes(); unsubscribeEdges() }
+    try {
+      return await operation()
+    } catch (error) {
+      if (!String(error).includes('InvalidStateError') && !String(error).includes('connection is closing')) throw error
+      this.db = null
+      this.histories = null
+      this.nodes = null
+      this.edges = null
+      this.findings = null
+      this.settings = null
+      this.sessions = null
+      this.requests = null
+      this.runtimeEvents = null
+      this.ensure()
+      return operation()
+    }
   }
 
   addNode(node: StoredEvidenceNode): void {

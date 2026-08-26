@@ -43,7 +43,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true
   }
   if (message?.type === 'runtime-investigator:get-events') {
-    const key = `events:${message.tabId}`
+    const tabId = message.tabId ?? sender.tab?.id
+    if (tabId == null) {
+      sendResponse({ events: [] })
+      return false
+    }
+    const key = `events:${tabId}`
     void chrome.storage.session.get(key).then((stored) => {
       const cutoff = Date.now() - RETENTION_MS
       const events = (stored[key] ?? []).filter((event) => event.ts >= cutoff)
