@@ -180,27 +180,96 @@ VerificationResult → FeltDB
 
 ### Certification Checklist
 
-Each step must prove the round trip is real (not mocked):
+Each step MUST:
+- Use real operations (no mocks)
+- Query workspace independently to verify persistence
+- Include `runId` for safeguarding against stale state
 
-- [x] Firefox extension loads
-- [ ] Privileged bootstrap message sent
+Status: **SCAFFOLDED (will output "NOT CERTIFIED" until TODOs are wired)**
+
+Gates (currently TODO):
+
+**1. Bootstrap**
+- [ ] Send privileged browser.runtime.sendMessage
 - [ ] Extension calls production `connectDevelopmentWorkspace(pairingCode)`
-- [ ] Real FeltDB workspace reached
-- [ ] Selection: Real DOM metrics captured
-- [ ] Selection: Published to workspace, **queryable from FeltDB**
-- [ ] Task: Created in workspace, **exists in FeltDB**
-- [ ] CodeChange: Published from test side, **received by extension via subscription**
-- [ ] Verification: Real `runtime.verify()` executed
-- [ ] Verification: Result persisted in workspace, **queryable from FeltDB**
+- [ ] Test publishes test entity to workspace
+- [ ] Query workspace independently: assert test entity exists
 
-### Critical Constraints
+**2. Selection**
+- [ ] Capture real DOM metrics via Firefox runtime.select()
+- [ ] Publish selection to workspace (with runId)
+- [ ] Query workspace independently: assert selection ID + runId + geometry match
 
-If Firefox E2E requires ANY of these, **STOP**—it's an abstraction problem:
-- ❌ DevelopmentRuntime modified
-- ❌ Chromium adapter modified
-- ❌ FeltDB protocol modified
+**3. Task**
+- [ ] Create task via workspace.createTask()
+- [ ] Query workspace independently: assert task identity + selection + intent
 
-Firefox must work with the exact same code as Chrome.
+**4. Subscription** (listener BEFORE publish)
+- [ ] Set up workspace subscription listener BEFORE test publishes
+- [ ] Test publishes CodeChange (with runId, taskId)
+- [ ] Assert Firefox extension receives via subscription event
+- [ ] Assert received payload contains correct ID
+
+**5. Verification**
+- [ ] Call real runtime.verify(selection, change)
+- [ ] Publish verification result to workspace (with runId)
+- [ ] Query workspace independently: assert result ID + status + metrics
+
+### Hard Boundary (Cannot Cross)
+
+**Allowed to change for PR 4.14.3:**
+- `e2e/firefox-real.mjs`
+- `e2e/` supporting utilities (if genuinely required)
+
+**Must NOT change:**
+- ❌ `@feltdb/development-runtime` (the Runtime itself)
+- ❌ `ChromiumAdapter` (existing browser implementation)
+- ❌ FeltDB workspace protocol (core API)
+- ❌ FeltDB core
+
+If Firefox E2E requires changes to these, **STOP**. It's an architectural problem, not a Firefox implementation problem.
+
+### Certification Rule
+
+```
+all five real round trips
+        +
+real Firefox extension
+        +
+real FeltDB
+        +
+real runtime
+        ↓
+    ✅ CERTIFIED
+```
+
+Anything else:
+```
+❌ NOT CERTIFIED
+exit 1
+```
+
+**No partial credit. No skipped steps. No mocks.**
+
+The test currently outputs "NOT CERTIFIED" because TODOs are placeholders.
+Once all five gates execute with real workspace operations, it will output "✅ CERTIFIED".
+
+### Important Distinction
+
+This is NOT valid "verification":
+```javascript
+const task = await workspace.createTask(input)
+expect(task.id).toBeTruthy()  // ❌ Testing return value, not persistence
+```
+
+This IS valid "verification":
+```javascript
+const task = await workspace.createTask(input)
+const persisted = await workspace.query({ taskId: task.id })
+expect(persisted.id).toBe(task.id)  // ✅ Testing independent persistence
+```
+
+Every gate must query the workspace independently.
 
 ### Usage
 
@@ -209,7 +278,57 @@ npm run test:e2e:firefox         # automated (CI)
 MANUAL=1 npm run test:e2e:firefox # interactive (inspection/demo)
 ```
 
-Once this passes completely, Safari becomes the final proof: can a third browser join the exact same protocol without any upstream changes?
+## Why Firefox First (Architectural Proof Point)
+
+Once Firefox E2E passes with **CERTIFIED** output:
+- Chrome works (✅ existing)
+- Firefox works (✅ after PR 4.14.3)
+- **Same runtime, same workspace protocol, two independent browser implementations**
+
+This proves the architecture is sound. Safari is then justified as a third implementation, not an experiment.
+
+**Do not proceed to Safari until Firefox genuinely PASSES.**
+
+Current state: Firefox test is scaffolded. It will run and output **NOT CERTIFIED** because the five gates have TODO placeholders. Implementation work is to replace TODOs with real workspace operations. Once all five execute with real FeltDB I/O and independent queries, the test will output **✅ CERTIFIED**.
+
+## Test Execution Order
+
+When you run Firefox E2E:
+
+```bash
+npm run test:e2e:firefox
+```
+
+1. Start FeltDB dev server (real)
+2. Start test fixture server (real)
+3. Launch Firefox with extension (real)
+4. Execute 5 gates:
+   - Each sends/receives real workspace operations
+   - Each queries workspace independently
+   - Each includes runId for safeguarding
+5. Output:
+   ```
+   ✓ Gate 1: Bootstrap
+   ✓ Gate 2: Selection
+   ✓ Gate 3: Task
+   ✓ Gate 4: Subscription
+   ✓ Gate 5: Verification
+   
+   🏆 PR 4.14.3: CERTIFIED
+   ```
+   OR
+   ```
+   ✗ Gate N failed
+   
+   ❌ PR 4.14.3: NOT CERTIFIED
+   exit 1
+   ```
+
+Manual mode:
+```bash
+MANUAL=1 npm run test:e2e:firefox
+```
+Pauses after each gate for inspection in FeltDB Studio.
 
 ## Implementation Order
 
