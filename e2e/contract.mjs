@@ -3,7 +3,7 @@
  *
  * All browsers must satisfy this contract:
  * The extension enables users to:
- * 1. Connect to a FeltDB workspace
+ * 1. Connect to a FeltDB workspace (via pairing code)
  * 2. Select an element on a web page
  * 3. Capture that element's properties
  * 4. Publish the selection to FeltDB
@@ -18,6 +18,16 @@
  *
  * The contract doesn't prescribe HOW each browser implements,
  * only WHAT must work end-to-end.
+ *
+ * Bootstrap Architecture:
+ * Test harness sends privileged bootstrap message to extension:
+ *   { type: 'feltdb:test:connect', workspaceId, pairingCode }
+ *
+ * Extension receives via browser.runtime.onMessage and calls:
+ *   connectDevelopmentWorkspace({ pairingCode })
+ *
+ * This is the PRODUCTION connection path, not a test-only variant.
+ * The test bootstrap only provides credentials; the connection is real.
  */
 
 export const developmentWorkflowContract = {
