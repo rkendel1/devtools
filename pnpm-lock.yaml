@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@feltdb/core':
-        specifier: ^0.6.8
-        version: 0.6.8(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+        specifier: ^0.6.9
+        version: 0.6.9(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@feltdb/development-runtime':
         specifier: file:./packages/development-runtime
         version: file:packages/development-runtime(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -261,8 +261,8 @@ packages:
       react-router-dom:
         optional: true
 
-  '@feltdb/core@0.6.8':
-    resolution: {integrity: sha512-e6Q8omkFNCOI53MzoDrCFPVx2tWyGlBnSDeXj4Y45QXHbj1zQydv5VrvUWKgcCJtheJ3rd56pwYkmByLooeYbQ==}
+  '@feltdb/core@0.6.9':
+    resolution: {integrity: sha512-zmFaKE+155sSt5oKWNldvZ6+Jf7iU2Qz4pAtR6WF9toiFwfwvpa5bgPH5nFFJUypHQW5ylkbEKohCh1Y+Ym8CA==}
     engines: {node: '>=14'}
     hasBin: true
     peerDependencies:
@@ -2504,7 +2504,7 @@ snapshots:
       react: 19.2.8
       react-dom: 19.2.8(react@19.2.8)
 
-  '@feltdb/core@0.6.8(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
+  '@feltdb/core@0.6.9(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
     optionalDependencies:
       react: 19.2.8
       react-dom: 19.2.8(react@19.2.8)

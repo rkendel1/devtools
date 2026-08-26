@@ -2,7 +2,7 @@
   "name": "feltdb-runtime-investigations",
   "displayName": "FeltDB Runtime Investigations",
   "description": "Receive durable browser runtime investigations from FeltDB workspaces.",
-  "version": "0.6.3",
+  "version": "0.6.4",
   "private": true,
   "type": "module",
   "engines": {
@@ -133,7 +133,7 @@
     "package": "npx @vscode/vsce package"
   },
   "dependencies": {
-    "@feltdb/core": "^0.6.8"
+    "@feltdb/core": "^0.6.9"
   },
   "devDependencies": {
     "@types/node": "^24.13.3",
