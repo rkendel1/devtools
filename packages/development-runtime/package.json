@@ -37,7 +37,7 @@
     }
   },
   "dependencies": {
-    "@feltdb/core": "0.6.12"
+    "@feltdb/core": "0.6.13"
   },
   "devDependencies": {
     "@types/node": "^24.13.3",

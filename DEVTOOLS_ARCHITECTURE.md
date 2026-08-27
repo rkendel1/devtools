@@ -424,7 +424,7 @@ The component to extend should be the actual shared boundary—`@feltdb/core/wor
 
 ## FeltDB Runtime Investigation Integration
 
-Release 0.6.11 integrates exactly with `@feltdb/core@0.6.12` while retaining legacy rich investigation records for compatibility and supplemental presentation.
+Release 0.6.11 integrates exactly with `@feltdb/core@0.6.13` while retaining legacy rich investigation records for compatibility and supplemental presentation.
 
 ```text
 Chrome DevTools

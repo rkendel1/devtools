@@ -21,7 +21,7 @@
     "demo": "node --loader ts-node/esm demo/demo.ts"
   },
   "dependencies": {
-    "@feltdb/core": "0.6.12",
+    "@feltdb/core": "0.6.13",
     "@feltdb/development-runtime": "file:./packages/development-runtime",
     "@feltdb/webllm": "^0.6.6",
     "react": "^19.2.8",
