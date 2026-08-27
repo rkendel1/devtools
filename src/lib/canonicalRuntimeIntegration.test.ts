@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
+  LEGACY_RUNTIME_INVESTIGATION_COLLECTION,
   RUNTIME_INVESTIGATION_COLLECTION,
   connectDevelopmentWorkspace,
   startLocalDevelopmentAuthority,
@@ -38,9 +39,11 @@ describe('canonical FeltDB runtime path', () => {
 
     const browserB = await connect('devtools-b', 'runtime_B')
     const observationB = await browserB.recordRuntimeObservation(input('local-investigation', 2))
-    const linked = await browserB.linkRuntimeObservationToInvestigation(observationB.observationId, investigation.id)
+    await browserB.linkRuntimeObservationToInvestigation(observationB.observationId, investigation.id)
+    const observationC = await browserB.recordRuntimeObservation(input('local-investigation', 3))
+    const linked = await browserB.linkRuntimeObservationToInvestigation(observationC.observationId, investigation.id)
     expect(linked.id).toBe(investigation.id)
-    expect(new Set(linked.observationIds)).toEqual(new Set([observationA.observationId, observationB.observationId]))
+    expect(new Set(linked.observationIds)).toEqual(new Set([observationA.observationId, observationB.observationId, observationC.observationId]))
     expect(observationA.runtimeInstanceId).toBe('runtime_A')
     expect(observationB.runtimeInstanceId).toBe('runtime_B')
     expect(observationA.correlation?.source?.investigationId).toBe('local-investigation')
@@ -49,11 +52,13 @@ describe('canonical FeltDB runtime path', () => {
 
     const ide = await connect('vscode-test', 'ide_runtime', 'ide')
     const records = await ide.query<RuntimeInvestigation>(RUNTIME_INVESTIGATION_COLLECTION)
+    const legacyRecords = await ide.query(LEGACY_RUNTIME_INVESTIGATION_COLLECTION)
     expect(records).toHaveLength(1)
+    expect(legacyRecords).toHaveLength(0)
     expect(records[0]?.id).toBe(investigation.id)
-    expect(new Set(records[0]?.observationIds)).toEqual(new Set([observationA.observationId, observationB.observationId]))
+    expect(new Set(records[0]?.observationIds)).toEqual(new Set([observationA.observationId, observationB.observationId, observationC.observationId]))
 
-    const serialized = JSON.stringify([observationA, observationB])
+    const serialized = JSON.stringify([observationA, observationB, observationC])
     for (const forbidden of ['Authorization', 'Cookie', 'Bearer secret', 'requestBody', 'responseBody', 'screenshot', 'evidenceGraph', 'diagnosis']) {
       expect(serialized).not.toContain(forbidden)
     }

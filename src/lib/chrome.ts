@@ -106,6 +106,13 @@ export function subscribeToRequests(onRequest: (request: NetworkRequestSnapshot)
   return () => chrome.devtools.network.onRequestFinished.removeListener(listener)
 }
 
+export function subscribeToNavigations(onNavigation: () => void): () => void {
+  if (!hasChromeDevtools()) return () => undefined
+  const listener = () => onNavigation()
+  chrome.devtools.network.onNavigated.addListener(listener)
+  return () => chrome.devtools.network.onNavigated.removeListener(listener)
+}
+
 export async function captureEnvironment(): Promise<{ pageUrl?: string; userAgent?: string; viewport?: string }> {
   if (!hasChromeDevtools()) return {}
   return new Promise((resolve) => chrome.devtools.inspectedWindow.eval(

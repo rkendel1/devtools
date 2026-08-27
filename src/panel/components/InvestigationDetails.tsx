@@ -30,6 +30,7 @@ export function InvestigationDetails({ record, workspaceConnected, sendToIde, ex
   const [showReplayButton, setShowReplayButton] = useState(true)
   const [handoffState, setHandoffState] = useState<'idle' | 'sending' | 'sent'>('idle')
   const [handoffMessage, setHandoffMessage] = useState('')
+  const [detailTab, setDetailTab] = useState<'summary' | 'evidence' | 'tools'>('summary')
 
   const handleSendToIde = async () => {
     setHandoffState('sending')
@@ -98,13 +99,22 @@ export function InvestigationDetails({ record, workspaceConnected, sendToIde, ex
       <button className="primary" onClick={() => void handleSendToIde()} disabled={!workspaceConnected || handoffState !== 'idle'}>
         {handoffState === 'sending' ? 'Sending…' : handoffState === 'sent' ? '✓ Sent to IDE' : 'Send to IDE'}
       </button>
-      {!workspaceConnected && <span className="meta">Connect a development workspace to enable IDE handoff.</span>}
+      {!workspaceConnected && <span className="meta">Connect a workspace in Settings to send this issue.</span>}
     </div>
     {handoffMessage && <p className={handoffState === 'sent' ? 'status' : 'action-result'}>{handoffMessage}</p>}
 
+    <nav className="detail-tabs" aria-label="Investigation details">
+      {(['summary', 'evidence', 'tools'] as const).map((tab) => <button key={tab} className={detailTab === tab ? 'active' : ''} onClick={() => setDetailTab(tab)}>{tab[0].toUpperCase() + tab.slice(1)}</button>)}
+    </nav>
+
+    <div hidden={detailTab !== 'summary'}>
     <h3>Evidence</h3><ul className="list">{result.evidence.map((item) => <li key={item}>{item}</li>)}</ul>
     {!!graph.anomalies.length && <><h3>Potential anomalies</h3><ul className="list">{graph.anomalies.map((item) => <li key={item}>{item}</li>)}</ul></>}
     {!!graph.comparison?.semanticDiff?.length && <><h3>Compared with successful request</h3><ul className="list">{graph.comparison.semanticDiff.map((item) => <li key={item}>{item}</li>)}</ul></>}
+    {!!result.nextActions.length && <><h3>Recommended next steps</h3><ul className="list">{result.nextActions.slice(0, 4).map((item) => <li key={item}>{item}</li>)}</ul></>}
+    </div>
+
+    <div hidden={detailTab !== 'tools'}>
     <h3>Causal Analysis</h3>
     <div className="actions">
       {showReplayButton && (
@@ -147,7 +157,9 @@ export function InvestigationDetails({ record, workspaceConnected, sendToIde, ex
         {comparisonInvestigation ? '✓' : 'Set as'} Before for Verification
       </button>
     </div>
+    </div>
 
+    <div hidden={detailTab !== 'evidence'}>
     <h3>Trace and source lines</h3><div className="trace">{graph.trace.map((step, index) => <div className="trace-item" key={`${step.label}:${index}`}><div><span className="step-number">{index + 1}</span>{step.label}</div>{step.source && <button className="source-link" onClick={() => openSourceLocation(step.source!, step.line)}>{step.source}{step.line ? `:${step.line}` : ''}</button>}</div>)}</div>
 
     <EvidenceGraphView investigationId={record.id} />
@@ -161,7 +173,9 @@ export function InvestigationDetails({ record, workspaceConnected, sendToIde, ex
       <Bundle title="Environment" value={graph.bundle.environment} />
       <Bundle title="Reproduction steps" value={graph.bundle.reproductionSteps} />
     </div>{graph.bundle.screenshot && <><img className="screenshot" src={graph.bundle.screenshot} alt="Captured inspected page" /><button onClick={() => downloadDataUrl(`runtime-investigation-${record.id}.png`, graph.bundle!.screenshot!)}>Save screenshot</button></>}</details>}
+    </div>
 
+    <div hidden={detailTab !== 'tools'}>
     <h3>Investigation actions</h3><div className="actions"><button onClick={() => setActionResult(runAction('compare'))}>Compare successful request</button><button onClick={() => setActionResult(runAction('source'))}>Show source</button><button onClick={() => setActionResult(runAction('trace'))}>Trace request</button><button onClick={() => setActionResult(reinvestigate())}>Investigate again</button></div>
     {actionResult && <pre className="action-result">{actionResult}</pre>}
     {!!result.nextActions.length && <><h3>Recommended follow-ups</h3><ul className="list">{result.nextActions.map((item) => <li key={item}>{item}</li>)}</ul></>}
@@ -173,6 +187,7 @@ export function InvestigationDetails({ record, workspaceConnected, sendToIde, ex
       {aiAnswer && <pre className="ai-answer">{aiAnswer}</pre>}
     </section>
     <div className="actions"><select value={exportFormat} onChange={(event) => setExportFormat(event.target.value as ExportFormat)}><option value="text">Plain text</option><option value="markdown">Markdown / GitHub</option><option value="jira">Jira</option><option value="json">JSON</option></select><button className="primary" onClick={() => void copyDetails().then(setActionResult)}>Copy all details</button><button onClick={() => setActionResult(exportDetails())}>Download report</button></div>
+    </div>
   </section>
 }
 

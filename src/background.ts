@@ -14,7 +14,6 @@ import {
   type RuntimeInvestigation,
   type RuntimeRequestObservation,
 } from '@feltdb/core/workspace'
-import { classifyInvestigationVerification } from './lib/investigationVerification'
 import type { RuntimeObservationInput } from './lib/runtimeObservation'
 
 type RuntimeMessage = {
@@ -165,135 +164,35 @@ async function handleInvestigationHandoff(message: RuntimeMessage): Promise<Inve
       : undefined
     if (message.runtimeObservationInput != null && !runtimeObservationInput) return { ok: false, error: 'INVALID_RUNTIME_OBSERVATION_INPUT' }
     const devtoolsInvestigation = message.investigation as any
-    let runtimeObservation: RuntimeRequestObservation | undefined
-    let canonicalInvestigation: RuntimeInvestigation | undefined
-    if (runtimeObservationInput && connection.sessionId && connection.runtimeInstanceId) {
-      canonicalInvestigation = await resolveCanonicalInvestigation(connection, devtoolsInvestigation)
-      const recordedObservation = await connection.recordRuntimeObservation({
-        ...runtimeObservationInput,
-        correlation: {
-          source: {
-            product: 'feltdb-devtools',
-            clientId: connection.clientId,
-            investigationId: devtoolsInvestigation.id,
-          },
-        },
-      })
-      runtimeObservation = recordedObservation
-      canonicalInvestigation = canonicalInvestigation
-        ? await connection.linkRuntimeObservationToInvestigation(recordedObservation.observationId, canonicalInvestigation.id)
-        : await connection.createRuntimeInvestigation({ observationId: recordedObservation.observationId })
+    if (!connection.sessionId || !connection.runtimeInstanceId) {
+      return { ok: false, error: 'Canonical runtime investigation unavailable: FeltDB did not provide session/runtime identity.' }
     }
-
-    // New automatic work is canonical-only. The explicit Send to IDE action
-    // retains the legacy rich-envelope behavior for compatibility.
-    if (message.type === 'runtime-investigator:observe' && canonicalInvestigation && runtimeObservation) {
+    let canonicalInvestigation = await resolveCanonicalInvestigation(connection, devtoolsInvestigation)
+    if (message.type === 'runtime-investigator:send-to-ide') {
+      if (!canonicalInvestigation) {
+        return { ok: false, error: 'Canonical runtime investigation unavailable: capture a canonical runtime observation first.' }
+      }
       return {
         ok: true,
-        entityId: canonicalInvestigation?.id ?? '',
+        entityId: canonicalInvestigation.id,
         workspaceId: extensionWorkspace.workspaceId,
-        canonicalObservationId: runtimeObservation?.observationId,
-        canonicalInvestigationId: canonicalInvestigation?.id,
+        canonicalInvestigationId: canonicalInvestigation.id,
       }
     }
-    const incoming = message.investigation as { graph?: { request?: { method?: string; url?: string; status?: number }; response?: { statusText?: string } } }
-    const request = incoming.graph?.request
-    const active = request?.method && request.url
-      ? (await connection.query(LEGACY_RUNTIME_INVESTIGATION_COLLECTION))
-          .filter((candidate: any) =>
-            ['INVESTIGATING', 'VERIFYING'].includes(candidate?.lifecycle)
-            && candidate?.developmentActivity?.length > 0
-            && candidate?.investigation?.graph?.request?.method === request.method
-            && requestFingerprint(candidate?.investigation?.graph?.request?.url) === requestFingerprint(request.url)
-            && sameRuntimeContext(candidate?.investigation, incoming)
-            && Date.now() - latestDevelopmentAt(candidate) < 60 * 60 * 1000)
-          .sort((a: any, b: any) => latestDevelopmentAt(b) - latestDevelopmentAt(a))[0]
-      : undefined
-    const envelope = {
-      kind: 'runtime_investigation',
-      schemaVersion: 1,
-      workspaceId: extensionWorkspace.workspaceId,
-      lifecycle: 'NEW',
-      status: 'OPEN',
-      source: {
-        clientId: connection.clientId,
-        clientType: connection.clientType,
-        product: 'chrome-runtime-investigator',
-      },
-      sentAt: Date.now(),
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      originalObservationId: (message.investigation as any).requestId ?? (message.investigation as any).id,
-      ...((message.investigation as any).canonicalObservationIds?.length
-        ? {
-            canonicalObservationIds: [...new Set([
-              ...((message.investigation as any).canonicalObservationIds ?? []),
-            ])],
-            ...((message.investigation as any).canonicalInvestigationId
-              ? { canonicalInvestigationId: (message.investigation as any).canonicalInvestigationId }
-              : {}),
-          }
-        : {}),
-      history: [{ type: 'OBSERVATION_CAPTURED', at: Date.now(), data: { observationId: (message.investigation as any).requestId } }],
-      delivery: message.type === 'runtime-investigator:send-to-ide' ? 'manual' : 'automatic',
-      investigation: structuredClone(message.investigation),
-      ...(active?.entityId ? { verificationOf: active.entityId } : {}),
-    }
-    const entityId = await connection.publish(LEGACY_RUNTIME_INVESTIGATION_COLLECTION, envelope)
-    // FeltDB assigns the durable identity. Persist it back onto the same entity so
-    // clients that reconnect and query retain that identity, not a local surrogate.
-    await connection.update(LEGACY_RUNTIME_INVESTIGATION_COLLECTION, entityId, { entityId })
-    if (active?.entityId && request) {
-      const outcome = classifyInvestigationVerification(
-        {
-          status: Number(active.investigation?.graph?.request?.status ?? 0),
-          anomalies: active.investigation?.graph?.anomalies ?? [],
-          protocol: active.investigation?.graph?.request?.protocol,
-          scenarioExercised: true,
-        },
-        {
-          status: Number(incoming.graph?.request?.status ?? 0),
-          anomalies: (incoming as any).graph?.anomalies ?? [],
-          protocol: (incoming as any).graph?.request?.protocol,
-          runtimeAvailable: true,
-          scenarioExercised: true,
-        },
-      )
-      const verification = {
-        entityId,
-        observedAt: Date.now(),
-        status: request.status ?? 0,
-        statusText: incoming.graph?.response?.statusText,
-        outcome,
-      }
-      await connection.update(LEGACY_RUNTIME_INVESTIGATION_COLLECTION, active.entityId, {
-        lifecycle: outcome === 'FIXED' ? 'RESOLVED' : outcome === 'REGRESSION' ? 'REGRESSION' : outcome,
-        status: outcome,
-        updatedAt: verification.observedAt,
-        history: [...(active.history ?? []), { type: 'APPLICATION_RUNTIME_OBSERVABLE', at: verification.observedAt }, { type: 'VERIFICATION_OBSERVED', at: verification.observedAt, data: { verificationId: active.verificationId, changeId: active.changeId, observationEntityId: entityId, outcome } }],
-        verifications: [...(active.verifications ?? []), verification],
-      })
-      const result = {
-        type: 'INVESTIGATION_VERIFICATION_RESULT',
-        investigationId: active.investigation?.id,
-        entityId: active.entityId,
-        observationEntityId: entityId,
-        outcome,
-        originalStatus: active.investigation?.graph?.request?.status ?? 0,
-        verificationStatus: request.status ?? 0,
-        observedAt: verification.observedAt,
-      }
-      await connection.publish('investigation_verifications', result)
-      await chrome.storage.session.remove(`${VERIFICATION_KEY_PREFIX}${active.entityId}`)
-      await chrome.alarms.clear(`${VERIFICATION_ALARM_PREFIX}${active.entityId}`)
-      void chrome.runtime.sendMessage({ type: 'runtime-investigator:verification-result', result }).catch(() => undefined)
-    }
+    if (!runtimeObservationInput) return { ok: false, error: 'INVALID_RUNTIME_OBSERVATION_INPUT' }
+    const runtimeObservation = await connection.recordRuntimeObservation({
+      ...runtimeObservationInput,
+      correlation: { source: { product: 'feltdb-devtools', clientId: connection.clientId, investigationId: devtoolsInvestigation.id } },
+    })
+    const resultingInvestigation = canonicalInvestigation
+      ? await connection.linkRuntimeObservationToInvestigation(runtimeObservation.observationId, canonicalInvestigation.id)
+      : await connection.createRuntimeInvestigation({ observationId: runtimeObservation.observationId })
     return {
       ok: true,
-      entityId,
+      entityId: resultingInvestigation.id,
       workspaceId: extensionWorkspace.workspaceId,
-      canonicalObservationId: runtimeObservation?.observationId,
-      canonicalInvestigationId: canonicalInvestigation?.id,
+      canonicalObservationId: runtimeObservation.observationId,
+      canonicalInvestigationId: resultingInvestigation.id,
     }
   } catch (error) {
     console.error('[Runtime Investigator] Investigation handoff failed', error)
@@ -332,30 +231,6 @@ async function resolveCanonicalInvestigation(
     if (linked) return linked
   }
   return undefined
-}
-
-function requestFingerprint(url: unknown): string {
-  if (typeof url !== 'string') return ''
-  try { const parsed = new URL(url); return `${parsed.origin}${parsed.pathname}` } catch { return url.split('?')[0] }
-}
-
-function sameRuntimeContext(original: any, current: any): boolean {
-  const originalProtocol = original?.graph?.request?.protocol
-  const currentProtocol = current?.graph?.request?.protocol
-  if (originalProtocol && currentProtocol && originalProtocol !== currentProtocol) return false
-  const originalPage = pageFingerprint(original?.graph?.bundle?.environment?.pageUrl)
-  const currentPage = pageFingerprint(current?.graph?.bundle?.environment?.pageUrl)
-  return !originalPage || !currentPage || originalPage === currentPage
-}
-
-function pageFingerprint(value: unknown): string {
-  if (typeof value !== 'string') return ''
-  try { const url = new URL(value); return `${url.origin}${url.pathname}` } catch { return value.split('?')[0] }
-}
-
-function latestDevelopmentAt(candidate: any): number {
-  const activity = candidate?.developmentActivity
-  return Array.isArray(activity) && activity.length ? Number(activity[activity.length - 1]?.observedAt ?? 0) : 0
 }
 
 async function markRuntimeObservable(): Promise<void> {

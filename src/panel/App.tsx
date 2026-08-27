@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   captureConsoleEvents, captureEnvironment, captureRequests, endpointKey,
-  hasChromeDevtools, openSourceLocation, pingExtensionContext, subscribeToRequests,
+  hasChromeDevtools, openSourceLocation, pingExtensionContext, subscribeToNavigations, subscribeToRequests,
 } from '../lib/chrome'
 import { buildEvidenceGraph } from '../lib/evidenceEngine'
 import { reasonFromEvidence } from '../lib/reasoner'
@@ -22,6 +22,7 @@ import { WorkspaceConnection } from './components/WorkspaceConnection'
 
 type ExportFormat = 'text' | 'markdown' | 'jira' | 'json'
 type Filters = { query: string; status: string; domain: string; type: string; timeframe: string }
+type PanelTab = 'investigate' | 'capture' | 'history' | 'settings'
 type VerificationState = { phase: 'VERIFYING' | 'RESULT'; files?: string[]; outcome?: string; originalStatus?: number; verificationStatus?: number; changeId?: string; verificationId?: string; diff?: string; branch?: string; commit?: string; method?: string; url?: string }
 
 const EMPTY_FILTERS: Filters = { query: '', status: 'all', domain: 'all', type: 'all', timeframe: 'all' }
@@ -39,6 +40,7 @@ export default function App() {
   const [historyQuery, setHistoryQuery] = useState('')
   const [exportFormat, setExportFormat] = useState<ExportFormat>('text')
   const [autoInvestigate, setAutoInvestigate] = useState(true)
+  const [activeTab, setActiveTab] = useState<PanelTab>('investigate')
   const [showPrivacy, setShowPrivacy] = useState(false)
   const [redactionPreview, setRedactionPreview] = useState('')
   const [loading, setLoading] = useState(false)
@@ -175,7 +177,7 @@ export default function App() {
     if (hasChromeDevtools()) void feltRepository.persistRequests(chrome.devtools.inspectedWindow.tabId, incoming, privacyRef.current).catch(
       (error) => setMessage(`FeltDB request persistence failed: ${String(error)}`),
     )
-    if (!selectedRequestId && next.length) setSelectedRequestId((next.find((request) => request.status >= 400) ?? next.at(-1))!.id)
+    if (next.length) setSelectedRequestId((current) => current || (next.find((request) => request.status >= 400) ?? next.at(-1))!.id)
   }
 
   async function investigateRequest(request: NetworkRequestSnapshot, automatic = false): Promise<void> {
@@ -203,36 +205,7 @@ export default function App() {
       historyRef.current = next
       setHistory(next)
       setInvestigation(record)
-      if (workspaceConnected) {
-        const runtimeObservationInput = toRuntimeObservationInput(request, {
-          pageUrl: environment.pageUrl,
-          userAgent: environment.userAgent,
-          correlatedEvents: events,
-        })
-        try {
-          const response = await chrome.runtime.sendMessage({
-            type: 'runtime-investigator:observe',
-            investigation: record,
-            runtimeObservationInput,
-          })
-          if (!response?.ok) throw new Error(response?.error || 'Failed to publish runtime observation')
-          if (response.canonicalObservationId) {
-            record = {
-              ...record,
-              canonicalObservationIds: [...new Set([...(record.canonicalObservationIds ?? []), response.canonicalObservationId])],
-              canonicalInvestigationId: response.canonicalInvestigationId,
-            }
-            const correlated = updateHistory([record, ...historyRef.current.filter((item) => item.id !== record.id)])
-            historyRef.current = correlated
-            setHistory(correlated)
-            setInvestigation(record)
-            setMessage(`Canonical runtime observation published · ${response.canonicalObservationId}`)
-          }
-        } catch (error) {
-          setMessage(`Investigation saved locally; canonical observation publish failed: ${String(error)}`)
-        }
-      }
-      if (!workspaceConnected) setMessage(automatic ? `Automatically investigated ${request.status} ${request.url}` : 'Investigation complete.')
+      setMessage(automatic ? `Investigated locally · ${request.status} ${request.url}` : 'Investigation complete · review before sending to IDE.')
     } catch (error) {
       setMessage(`Investigation failed: ${String(error)}`)
     } finally {
@@ -242,8 +215,9 @@ export default function App() {
 
   useEffect(() => {
     if (!hasChromeDevtools()) return
-    void captureRequests(MAX_LIVE_REQUESTS).then(addRequests)
-    return subscribeToRequests((request) => {
+    const reconcile = () => void captureRequests(MAX_LIVE_REQUESTS).then(addRequests).catch((error) => setMessage(`Traffic sync failed: ${String(error)}`))
+    reconcile()
+    const unsubscribeRequests = subscribeToRequests((request) => {
       addRequests([request])
       const verification = verificationStateRef.current
       const matchesVerification = verification?.phase === 'VERIFYING'
@@ -255,6 +229,16 @@ export default function App() {
       }
       if (matchesVerification || (autoInvestigate && request.status >= 400)) void investigateRequest(request, true)
     })
+    const unsubscribeNavigations = subscribeToNavigations(reconcile)
+    const syncWhenVisible = () => { if (document.visibilityState === 'visible') reconcile() }
+    document.addEventListener('visibilitychange', syncWhenVisible)
+    window.addEventListener('focus', reconcile)
+    return () => {
+      unsubscribeRequests()
+      unsubscribeNavigations()
+      document.removeEventListener('visibilitychange', syncWhenVisible)
+      window.removeEventListener('focus', reconcile)
+    }
   // The listener reads current values from refs; resubscribe only when auto mode changes.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoInvestigate])
@@ -294,11 +278,36 @@ export default function App() {
   }
 
   async function sendToIde(record: InvestigationRecord): Promise<{ entityId: string; workspaceId: string }> {
+    let messagePayload: Record<string, unknown> = { type: 'runtime-investigator:send-to-ide', investigation: record }
+    if (!record.canonicalInvestigationId) {
+      const request = requestsRef.current.find((item) => item.id === record.requestId)
+      if (!request) throw new Error('The captured request expired from memory. Investigate it again before sending.')
+      const [events, environment] = await Promise.all([captureConsoleEvents(500), captureEnvironment()])
+      messagePayload = {
+        type: 'runtime-investigator:observe',
+        investigation: record,
+        runtimeObservationInput: toRuntimeObservationInput(request, {
+          pageUrl: environment.pageUrl,
+          userAgent: environment.userAgent,
+          correlatedEvents: events,
+        }),
+      }
+    }
     const response = await chrome.runtime.sendMessage({
-      type: 'runtime-investigator:send-to-ide',
-      investigation: record,
+      ...messagePayload,
     })
     if (!response?.ok) throw new Error(response?.error || 'Failed to send investigation to IDE')
+    if (response.canonicalInvestigationId) {
+      const updated = {
+        ...record,
+        canonicalInvestigationId: response.canonicalInvestigationId,
+        canonicalObservationIds: response.canonicalObservationId
+          ? [...new Set([...(record.canonicalObservationIds ?? []), response.canonicalObservationId])]
+          : record.canonicalObservationIds,
+      }
+      setInvestigation(updated)
+      mutateHistory((records) => records.map((item) => item.id === updated.id ? updated : item))
+    }
     setMessage(`Sent investigation to IDE · ${response.entityId}`)
     return { entityId: response.entityId, workspaceId: response.workspaceId }
   }
@@ -355,28 +364,31 @@ export default function App() {
   }
 
   return (
-    <div className="app">
+    <div className="app compact-app">
       <main className="card">
         <header className="panel-header">
-          <div><h1>Investigate</h1><p className="meta">Live evidence · FeltDB {storageStatus} · 24-hour automatic retention{lastCleanup ? ` · cleaned ${new Date(lastCleanup).toLocaleTimeString()}` : ''} · sensitive values redacted locally</p></div>
+          <div><h1>Investigate</h1><p className="meta">Local-first runtime debugging · sensitive values redacted</p></div>
           <div className="header-actions">
-            <label className="toggle"><input type="checkbox" checked={autoInvestigate} onChange={(event) => setAutoInvestigate(event.target.checked)} /> Auto-investigate</label>
-            <button onClick={() => setShowPrivacy((value) => !value)}>Privacy</button>
+            <label className="toggle"><input type="checkbox" checked={autoInvestigate} onChange={(event) => setAutoInvestigate(event.target.checked)} /> Auto-investigate <span className="meta">(local only)</span></label>
           </div>
         </header>
+
+        <nav className="panel-tabs" aria-label="Investigate sections">
+          {(['investigate', 'capture', 'history', 'settings'] as PanelTab[]).map((tab) => <button key={tab} className={activeTab === tab ? 'active' : ''} onClick={() => setActiveTab(tab)}>{tab === 'investigate' ? 'Issue' : tab[0].toUpperCase() + tab.slice(1)}{tab === 'history' && history.length ? ` (${history.length})` : ''}</button>)}
+        </nav>
 
         {!hasChromeDevtools() && <p className="badge warn">Open this page inside the Chrome DevTools Investigate panel.</p>}
         {!contextValid && <div className="context-invalid"><strong>Extension was reloaded.</strong> This DevTools panel is stale, so its buttons cannot contact the extension. Close DevTools completely and reopen it.</div>}
 
-        <WorkspaceConnection
+        {activeTab === 'settings' && <WorkspaceConnection
           onConnect={handleWorkspaceConnect}
           isConnected={workspaceConnected}
           workspaceId={workspaceId}
           error={workspaceError}
           loading={workspaceLoading}
-        />
+        />}
 
-        {verificationState && <section className="settings">
+        {activeTab === 'investigate' && verificationState && <section className="settings compact-verification">
           <h3>{verificationState.phase === 'VERIFYING' ? '⟳ Verification in progress' : verificationState.outcome === 'FIXED' ? '✓ Fix verified' : `Verification: ${verificationState.outcome}`}</h3>
           <ol>
             <li>Original observation{investigation ? ` · ${investigation.graph.request.method} ${investigation.graph.request.url} · status ${investigation.graph.request.status}` : ''}</li>
@@ -389,15 +401,15 @@ export default function App() {
           {verificationState.diff && <details><summary>View diff</summary><pre>{verificationState.diff}</pre></details>}
         </section>}
 
-        {showPrivacy && <section className="settings">
+        {activeTab === 'settings' && <><button onClick={() => setShowPrivacy((value) => !value)}>{showPrivacy ? 'Hide privacy settings' : 'Privacy settings'}</button>{showPrivacy && <section className="settings">
           <h3>Privacy and bundle settings</h3>
           <label>Additional sensitive fields<input value={privacy.sensitiveKeys.join(', ')} onChange={(event) => updatePrivacy({ ...privacy, sensitiveKeys: event.target.value.split(',').map((key) => key.trim()).filter(Boolean) })} placeholder="accountId, secret" /></label>
           <label><input type="checkbox" checked={privacy.includeHeaders} onChange={(event) => updatePrivacy({ ...privacy, includeHeaders: event.target.checked })} /> Include redacted headers</label>
           <label><input type="checkbox" checked={privacy.includeBodies} onChange={(event) => updatePrivacy({ ...privacy, includeBodies: event.target.checked })} /> Include redacted bodies</label>
           <label>Redaction preview<input value={redactionPreview} onChange={(event) => setRedactionPreview(event.target.value)} placeholder={'{"accountId":"secret"}'} /><pre>{redactText(redactionPreview, privacy.sensitiveKeys).redacted || 'Enter sample text to preview redaction.'}</pre></label>
-        </section>}
+        </section>}</>}
 
-        <section className="filters" aria-label="Request filters">
+        {activeTab === 'capture' && <><section className="filters" aria-label="Request filters">
           <input value={filters.query} onChange={(event) => setFilters({ ...filters, query: event.target.value })} placeholder="Search requests" />
           <select value={filters.status} onChange={(event) => setFilters({ ...filters, status: event.target.value })}><option value="all">All statuses</option><option value="errors">Errors only</option><option value="4xx">4xx</option><option value="5xx">5xx</option></select>
           <select value={filters.domain} onChange={(event) => setFilters({ ...filters, domain: event.target.value })}><option value="all">All domains</option>{domains.map((domain) => <option key={domain}>{domain}</option>)}</select>
@@ -411,10 +423,8 @@ export default function App() {
             <option value="">Select a request ({filteredRequests.length})</option>
             {filteredRequests.map((request) => <option key={request.id} value={request.id}>{formatRequest(request)}</option>)}
           </select>
-          <button onClick={() => void captureRequests(MAX_LIVE_REQUESTS).then(addRequests)} disabled={loading}>Refresh</button>
-          <button className="primary" onClick={() => selectedRequest && void investigateRequest(selectedRequest)} disabled={loading || !selectedRequest}>Investigate</button>
+          <button className="primary" onClick={() => { if (selectedRequest) { void investigateRequest(selectedRequest); setActiveTab('investigate') } }} disabled={loading || !selectedRequest}>Investigate</button>
         </div>
-        <p className="status" aria-live="polite">{message}</p>
 
         <ScreenshotGallery
           frames={screenshots}
@@ -424,8 +434,11 @@ export default function App() {
           copy={(frame) => void copyScreenshot(frame)}
           remove={(id) => setScreenshots((current) => current.filter((frame) => frame.id !== id))}
           clear={() => { setRecordingScreens(false); setScreenshots([]); setMessage('In-memory screenshots cleared.') }}
-        />
+        /></>}
 
+        {activeTab !== 'history' && <p className="status" aria-live="polite">{message}</p>}
+
+        {activeTab === 'investigate' && <>
         {investigation ? <InvestigationDetails key={investigation.id} record={investigation} workspaceConnected={workspaceConnected} sendToIde={sendToIde} exportFormat={exportFormat} setExportFormat={setExportFormat} copyDetails={copyDetails} exportDetails={exportDetails} reinvestigate={() => {
           const request = requestsRef.current.find((item) => item.id === investigation.requestId)
           if (!request) return 'The original request has expired from live memory. Select a current request above to investigate it again.'
@@ -440,15 +453,18 @@ export default function App() {
             return `Opened ${source}${investigation.graph.initiator?.line ? `:${investigation.graph.initiator.line}` : ''} in Sources.`
           }
           return investigation.graph.trace.length ? investigation.graph.trace.map((step, index) => `${index + 1}. ${step.label}${step.source ? ` — ${step.source}:${step.line ?? 1}` : ''}`).join('\n') : 'No trace steps were captured.'
-        }} contextValid={contextValid} aiModel={aiModel} setAiModel={setAiModel} aiStatus={aiStatus} aiLoading={aiLoading} aiQuestion={aiQuestion} setAiQuestion={setAiQuestion} aiAnswer={aiAnswer} enhanceCurrent={enhanceCurrent} askCurrent={askCurrent} /> : <p className="empty">Waiting for a failed request or runtime error. You can also select any request manually.</p>}
+        }} contextValid={contextValid} aiModel={aiModel} setAiModel={setAiModel} aiStatus={aiStatus} aiLoading={aiLoading} aiQuestion={aiQuestion} setAiQuestion={setAiQuestion} aiAnswer={aiAnswer} enhanceCurrent={enhanceCurrent} askCurrent={askCurrent} /> : <p className="empty">Waiting for a failed request or runtime error. Choose a request in Capture to investigate manually.</p>}
+        </>}
+
+        {activeTab === 'settings' && <section className="settings-summary"><h2>Local storage</h2><p className="meta">FeltDB {storageStatus} · 24-hour retention{lastCleanup ? ` · last cleaned ${new Date(lastCleanup).toLocaleTimeString()}` : ''}</p></section>}
       </main>
 
-      <aside className="card history">
+      {activeTab === 'history' && <aside className="card history">
         <h2>Issue groups <span className="count">{history.length}</span></h2>
         <input value={historyQuery} onChange={(event) => setHistoryQuery(event.target.value)} placeholder="Search history" />
         {visibleHistory.length === 0 ? <p className="meta">No saved investigations yet.</p> : <ul className="history-list">
           {visibleHistory.map((item) => <li key={item.id} className={item.id === investigation?.id ? 'active' : ''}>
-            <button className="history-title" onClick={() => setInvestigation(item)}>{item.pinned ? '📌 ' : ''}{item.name ?? item.result.diagnosis}</button>
+            <button className="history-title" onClick={() => { setInvestigation(item); setActiveTab('investigate') }}>{item.pinned ? '📌 ' : ''}{item.name ?? item.result.diagnosis}</button>
             <div className="meta">{item.occurrenceCount ?? 1} occurrence(s) · first {new Date(item.firstSeenAt ?? item.createdAt).toLocaleString()} · last {new Date(item.lastSeenAt ?? item.createdAt).toLocaleString()}</div>
             <div className="mini-actions">
               <button onClick={() => mutateHistory((records) => records.map((record) => record.id === item.id ? { ...record, pinned: !record.pinned } : record))}>{item.pinned ? 'Unpin' : 'Pin'}</button>
@@ -458,7 +474,7 @@ export default function App() {
             </div>
           </li>)}
         </ul>}
-      </aside>
+      </aside>}
     </div>
   )
 }

@@ -453,7 +453,9 @@ VS Code
 
 After recording, DevTools uses `createRuntimeInvestigation()` for the first observation and `linkRuntimeObservationToInvestigation()` for later observations. `InvestigationRecord.canonicalObservationIds` and `canonicalInvestigationId` cache only the returned canonical identities. Resolution also uses the explicit DevTools correlation, allowing a restarted runtime instance to contribute to the same investigation. `originalObservationId` remains a legacy/local field and is never promoted.
 
-When canonical connection identity is unavailable, automatic publication falls back to the existing legacy collection. It does not create substitute session/runtime IDs.
+Auto-investigate performs local capture and analysis only. The explicit **Send to IDE** action records the canonical observation and creates or resolves the canonical investigation. This keeps automatic local diagnosis separate from workspace publication and gives the user one unambiguous sharing action.
+
+When canonical connection identity is unavailable, publication fails with `Canonical runtime investigation unavailable: FeltDB did not provide session/runtime identity.` DevTools neither invents identity nor falls back to creating a legacy entity. “Send to IDE” resolves and returns the existing canonical investigation ID without publishing another entity.
 
 ### Redaction and evidence boundary
 
