@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Chrome Runtime Investigator",
   "description": "Investigate runtime failures in DevTools using evidence-backed local analysis.",
-  "version": "0.1.0",
+  "version": "0.6.10",
   "devtools_page": "devtools.html",
   "background": {
     "service_worker": "background.js",

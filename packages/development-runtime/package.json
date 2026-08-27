@@ -1,6 +1,6 @@
 {
   "name": "@feltdb/development-runtime",
-  "version": "0.1.0",
+  "version": "0.6.10",
   "type": "module",
   "description": "Browser runtime for FeltDB Development Workspace — SELECT → CAPTURE → VERIFY",
   "main": "dist/index.js",
@@ -37,7 +37,7 @@
     }
   },
   "dependencies": {
-    "@feltdb/core": "^0.5.1"
+    "@feltdb/core": "^0.6.10"
   },
   "devDependencies": {
     "@types/node": "^24.13.3",

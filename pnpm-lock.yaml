@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@feltdb/core':
-        specifier: ^0.6.9
-        version: 0.6.9(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+        specifier: ^0.6.10
+        version: 0.6.10(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@feltdb/development-runtime':
         specifier: file:./packages/development-runtime
         version: file:packages/development-runtime(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -245,24 +245,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@feltdb/core@0.5.7':
-    resolution: {integrity: sha512-8LUgQZB8abSrcLCoR1v7MeF7X2nTZ1ZO6vpJcLoiTjMUkGByuVwuPFIfPUFxUFGbbXyY4G7wGQoWgv6oF+vl7Q==}
-    engines: {node: '>=14'}
-    hasBin: true
-    peerDependencies:
-      react: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
-      react-dom: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
-      react-router-dom: ^7.0.0
-    peerDependenciesMeta:
-      react:
-        optional: true
-      react-dom:
-        optional: true
-      react-router-dom:
-        optional: true
-
-  '@feltdb/core@0.6.9':
-    resolution: {integrity: sha512-zmFaKE+155sSt5oKWNldvZ6+Jf7iU2Qz4pAtR6WF9toiFwfwvpa5bgPH5nFFJUypHQW5ylkbEKohCh1Y+Ym8CA==}
+  '@feltdb/core@0.6.10':
+    resolution: {integrity: sha512-cDq+S5VnMzvzehsCI/TjdaQyXZ4AwhI96x3qGkom5wmxF4inq5+3bLSIwGV85xkySSU29iXgkXCLJlK6nKaBJQ==}
     engines: {node: '>=14'}
     hasBin: true
     peerDependencies:
@@ -2499,19 +2483,14 @@ snapshots:
   '@esbuild/win32-x64@0.28.2':
     optional: true
 
-  '@feltdb/core@0.5.7(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
-    optionalDependencies:
-      react: 19.2.8
-      react-dom: 19.2.8(react@19.2.8)
-
-  '@feltdb/core@0.6.9(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
+  '@feltdb/core@0.6.10(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
     optionalDependencies:
       react: 19.2.8
       react-dom: 19.2.8(react@19.2.8)
 
   '@feltdb/development-runtime@file:packages/development-runtime(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
     dependencies:
-      '@feltdb/core': 0.5.7(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@feltdb/core': 0.6.10(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
     transitivePeerDependencies:
       - react
       - react-dom
