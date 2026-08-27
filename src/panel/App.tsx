@@ -12,6 +12,7 @@ import { askLocalInvestigator, enhanceWithLocalAi, LOCAL_MODELS } from '../lib/l
 import { feltRepository } from '../lib/feltRepository'
 import { MAX_LIVE_REQUESTS } from '../lib/retention'
 import type { InvestigationRecord, NetworkRequestSnapshot, PrivacySettings } from '../lib/types'
+import { toRuntimeObservationInput } from '../lib/runtimeObservation'
 import { download, formatRequest, reportFor, writeClipboard } from './utils/export'
 import { useMaintenance } from './hooks/useMaintenance'
 import { useScreenshots } from './hooks/useScreenshots'
@@ -189,21 +190,49 @@ export default function App() {
       const fingerprint = `${endpointKey(request)}|${request.status}|${result.diagnosis}`
       const now = Date.now()
       const existing = historyRef.current.find((record) => record.fingerprint === fingerprint)
-      const record: InvestigationRecord = {
+      let record: InvestigationRecord = {
         id: existing?.id ?? crypto.randomUUID(), createdAt: existing?.createdAt ?? now,
         requestId: request.id, requestUrl: request.url, graph, result, fingerprint,
         name: existing?.name, pinned: existing?.pinned,
         occurrenceCount: existing ? (existing.occurrenceCount ?? 1) + (automatic ? 1 : 0) : 1,
         firstSeenAt: existing?.firstSeenAt ?? existing?.createdAt ?? now, lastSeenAt: now,
+        canonicalObservationIds: existing?.canonicalObservationIds,
+        canonicalInvestigationId: existing?.canonicalInvestigationId,
       }
       const next = updateHistory([record, ...historyRef.current.filter((item) => item.id !== record.id)])
       historyRef.current = next
       setHistory(next)
       setInvestigation(record)
       if (workspaceConnected) {
-        void chrome.runtime.sendMessage({ type: 'runtime-investigator:observe', investigation: record }).catch(() => undefined)
+        const runtimeObservationInput = toRuntimeObservationInput(request, {
+          pageUrl: environment.pageUrl,
+          userAgent: environment.userAgent,
+          correlatedEvents: events,
+        })
+        try {
+          const response = await chrome.runtime.sendMessage({
+            type: 'runtime-investigator:observe',
+            investigation: record,
+            runtimeObservationInput,
+          })
+          if (!response?.ok) throw new Error(response?.error || 'Failed to publish runtime observation')
+          if (response.canonicalObservationId) {
+            record = {
+              ...record,
+              canonicalObservationIds: [...new Set([...(record.canonicalObservationIds ?? []), response.canonicalObservationId])],
+              canonicalInvestigationId: response.canonicalInvestigationId,
+            }
+            const correlated = updateHistory([record, ...historyRef.current.filter((item) => item.id !== record.id)])
+            historyRef.current = correlated
+            setHistory(correlated)
+            setInvestigation(record)
+            setMessage(`Canonical runtime observation published · ${response.canonicalObservationId}`)
+          }
+        } catch (error) {
+          setMessage(`Investigation saved locally; canonical observation publish failed: ${String(error)}`)
+        }
       }
-      setMessage(automatic ? `Automatically investigated ${request.status} ${request.url}` : 'Investigation complete.')
+      if (!workspaceConnected) setMessage(automatic ? `Automatically investigated ${request.status} ${request.url}` : 'Investigation complete.')
     } catch (error) {
       setMessage(`Investigation failed: ${String(error)}`)
     } finally {

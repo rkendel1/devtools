@@ -421,3 +421,46 @@ The component to extend should be the actual shared boundary—`@feltdb/core/wor
 - FeltDB boundary claims use the installed declared dependency (`@feltdb/core` 0.6.10); the FeltDB repository was not modified.
 - Placeholder and TODO implementations are explicitly excluded from YES capability claims.
 - No protocol, type, transport, pairing, runtime, UI, or product behavior was changed by this audit.
+
+## FeltDB Runtime Investigation Integration
+
+Release 0.6.11 integrates exactly with `@feltdb/core@0.6.12` while retaining legacy rich investigation records for compatibility and supplemental presentation.
+
+```text
+Chrome DevTools
+      |
+      | rich capture (HAR, bodies, headers, graph, diagnosis)
+      v
+DevTools Investigation (local ID; browser-local rich evidence)
+      |
+      | canonicalObservationIds[]
+      v
+FeltDB Runtime Observation (canonical observationId)
+      |
+      v
+FeltDB Runtime Investigation (canonical lifecycle)
+      |\
+      | +-- Development Change -> Git identity
+      +---- Verification -> verificationId
+      |
+      v
+VS Code
+```
+
+### Identity and correlation
+
+`toRuntimeObservationInput()` in `src/lib/runtimeObservation.ts` is the only Chrome-capture-to-canonical-input mapping. The browser background passes that input to `DevelopmentWorkspaceConnection.recordRuntimeObservation()`. FeltDB supplies and persists `workspaceId`, `sessionId`, `runtimeInstanceId`, `observationId`, and `correlationId`; DevTools never derives them. DevTools request IDs and local investigation IDs remain distinct. The local investigation ID appears only at `correlation.source.investigationId`, with product `feltdb-devtools` and the connection-owned client ID.
+
+After recording, DevTools uses `createRuntimeInvestigation()` for the first observation and `linkRuntimeObservationToInvestigation()` for later observations. `InvestigationRecord.canonicalObservationIds` and `canonicalInvestigationId` cache only the returned canonical identities. Resolution also uses the explicit DevTools correlation, allowing a restarted runtime instance to contribute to the same investigation. `originalObservationId` remains a legacy/local field and is never promoted.
+
+When canonical connection identity is unavailable, automatic publication falls back to the existing legacy collection. It does not create substitute session/runtime IDs.
+
+### Redaction and evidence boundary
+
+The canonical projection contains only method, redacted URL/page, status, timing, network-failure state, runtime/browser context, correlated redacted runtime events, and limited content-type/status characteristics. It has no mapping for authorization/cookie headers, request or response bodies, screenshots, the evidence graph, heuristic diagnosis, or other Chrome-only metadata. Those remain in the browser-local FeltDB/IndexedDB investigation owned by DevTools.
+
+### Canonical lifecycle and compatibility
+
+VS Code subscribes to and queries canonical `runtime_investigation` first, resolves every `observationIds` entry through `getRuntimeObservation()`, and renders the canonical investigation/remediation/verification states and IDs as authoritative. Observation correlation locates a matching DevTools legacy record when present; its graph and diagnosis are supplemental only. Unmatched historical `runtime_investigations` records remain readable and writable through the existing compatibility flow.
+
+Reconnect uses the canonical workspace query and durable investigation record; no filesystem lifecycle manager or new transport is introduced. Canonical `changeId` and `verificationId` are displayed directly. Historical envelopes without explicit canonical references continue to load without reinterpretation.

@@ -1,10 +1,10 @@
 import * as vscode from 'vscode'
-import type { FeltWorkspaceClient, InvestigationItem } from './workspace-client.js'
+import { displayInvestigation, itemUpdatedAt, type FeltWorkspaceClient, type InvestigationItem } from './workspace-client.js'
 import { InvestigationView } from './investigation-view.js'
 
 export class InvestigationTreeItem extends vscode.TreeItem {
   constructor(readonly item: InvestigationItem) {
-    const investigation = item.envelope.investigation
+    const investigation = displayInvestigation(item)
     const request = investigation.graph.request
     super(requestPath(request.url), vscode.TreeItemCollapsibleState.None)
     this.id = investigation.id
@@ -36,15 +36,15 @@ export class InvestigationProvider implements vscode.TreeDataProvider<FeltTreeIt
 
   constructor(private readonly client: FeltWorkspaceClient) {
     this.subscriptions = [client.onInvestigation((item) => {
-      const previous = this.items.get(item.envelope.investigation.id)
-      this.items.set(item.envelope.investigation.id, item)
+      const previous = this.items.get(item.entityId)
+      this.items.set(item.entityId, item)
       this.changed.fire()
       InvestigationView.update(item)
-      if (previous?.envelope.lifecycle !== 'RESOLVED' && item.envelope.lifecycle === 'RESOLVED') {
+      if (previous && !isResolved(previous) && isResolved(item)) {
         void vscode.window.showInformationMessage(`FeltDB investigation resolved and verified in browser: ${summary(item)}`, 'Open').then((choice) => {
           if (choice === 'Open') void vscode.commands.executeCommand('feltdb.openInvestigation', item)
         })
-      } else if ((item.envelope.delivery === 'manual' || !previous) && !this.notifiedEntities.has(item.entityId)) {
+      } else if ((item.envelope?.delivery === 'manual' || !previous) && !this.notifiedEntities.has(item.entityId)) {
         this.notifiedEntities.add(item.entityId)
         void vscode.window.showInformationMessage(`FeltDB investigation received: ${summary(item)}`, ...(hasSourceCandidate(item) ? ['Open Source', 'Open Investigation'] as const : ['Open Investigation'] as const)).then((choice) => {
         if (choice === 'Open Source') void vscode.commands.executeCommand('feltdb.showSource', item)
@@ -66,7 +66,7 @@ export class InvestigationProvider implements vscode.TreeDataProvider<FeltTreeIt
     }
     if (element?.contextValue === 'runtimeInvestigationsGroup') {
       return [...this.items.values()]
-        .sort((a, b) => b.envelope.sentAt - a.envelope.sentAt)
+        .sort((a, b) => itemUpdatedAt(b) - itemUpdatedAt(a))
         .map((item) => new InvestigationTreeItem(item))
     }
     if (element) return []
@@ -87,7 +87,7 @@ export class InvestigationProvider implements vscode.TreeDataProvider<FeltTreeIt
 
   async refresh(): Promise<void> {
     const records = await this.client.query()
-    for (const item of records) this.items.set(item.envelope.investigation.id, item)
+    for (const item of records) this.items.set(item.entityId, item)
     this.changed.fire()
   }
 
@@ -95,7 +95,7 @@ export class InvestigationProvider implements vscode.TreeDataProvider<FeltTreeIt
   selected(): InvestigationItem | undefined { return this.selectedItem }
   findEntity(entityId: string): InvestigationItem | undefined { return [...this.items.values()].find((item) => item.entityId === entityId) }
   updated(item: InvestigationItem): void {
-    this.items.set(item.envelope.investigation.id, item)
+    this.items.set(item.entityId, item)
     this.changed.fire()
   }
 
@@ -108,12 +108,16 @@ function requestPath(url: string): string {
 }
 
 function summary(item: InvestigationItem): string {
-  const request = item.envelope.investigation.graph.request
+  const request = displayInvestigation(item).graph.request
   return `${request.method} ${requestPath(request.url)} → ${request.status}`
 }
 
 function hasSourceCandidate(item: InvestigationItem): boolean {
-  const graph = item.envelope.investigation.graph
+  const graph = displayInvestigation(item).graph
   if (graph.initiator?.source || graph.trace?.some((step) => step.source)) return true
   try { return /\.(?:[cm]?[jt]sx?|vue|svelte|astro|css|scss|less|html)$/i.test(new URL(graph.request.url).pathname) } catch { return false }
+}
+
+function isResolved(item: InvestigationItem): boolean {
+  return item.canonicalInvestigation?.verificationState === 'VERIFIED' || item.envelope?.lifecycle === 'RESOLVED'
 }

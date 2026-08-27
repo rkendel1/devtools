@@ -1,5 +1,5 @@
 import * as vscode from 'vscode'
-import type { InvestigationItem, RuntimeInvestigation } from './workspace-client.js'
+import { canonicalObservationIds, displayInvestigation, type InvestigationItem, type RuntimeInvestigation } from './workspace-client.js'
 
 export class InvestigationView {
   private static readonly panels = new Map<string, vscode.WebviewPanel>()
@@ -25,12 +25,12 @@ export class InvestigationView {
 
   static showTrace(extensionUri: vscode.Uri, item: InvestigationItem): void {
     const panel = createPanel('feltdb.requestTrace', 'Request Trace', extensionUri)
-    panel.webview.html = documentHtml(panel.webview, 'Request Trace', renderTrace(item.envelope.investigation))
+    panel.webview.html = documentHtml(panel.webview, 'Request Trace', renderTrace(displayInvestigation(item)))
   }
 
   static showComparison(extensionUri: vscode.Uri, item: InvestigationItem): void {
     const panel = createPanel('feltdb.comparison', 'Runtime Comparison', extensionUri)
-    const body = renderComparison(item.envelope.investigation)
+    const body = renderComparison(displayInvestigation(item))
     panel.webview.html = documentHtml(panel.webview, 'Comparison', body)
   }
 }
@@ -40,7 +40,7 @@ function createPanel(viewType: string, title: string, extensionUri: vscode.Uri):
 }
 
 function renderInvestigation(webview: vscode.Webview, item: InvestigationItem): string {
-  const value = item.envelope.investigation
+  const value = displayInvestigation(item)
   const request = value.graph.request
   const environment = value.graph.bundle?.environment
   const duration = request.timingMs ?? durationFromTrace(value)
@@ -49,12 +49,14 @@ function renderInvestigation(webview: vscode.Webview, item: InvestigationItem): 
   const nonce = crypto.randomUUID().replaceAll('-', '')
   return `<!doctype html><html><head>${head(webview, nonce)}</head><body>
   <h1>${failure ? 'Runtime Investigation' : 'Runtime Observation'}</h1><p>${escape(request.method)} ${escape(requestPath(request.url))}</p>
-  <div class="hero"><h2>Runtime status</h2><div class="grid"><span class="label">Request</span><strong>${escape(request.method)} ${escape(requestPath(request.url))}</strong><span class="label">Response</span><strong>${request.status} ${escape(value.graph.response?.statusText ?? '')}</strong>${duration == null ? '' : `<span class="label">Duration</span><span>${duration}ms</span>`}<span class="label">Completion</span><span>${completed ? '✓ Request completed' : failure ? '⚠ Failure evidence recorded' : 'Runtime observation recorded'}</span><span class="label">Lifecycle</span><span>${escape(item.envelope.lifecycle ?? 'NEW')}</span></div></div>
+  <div class="hero"><h2>Runtime status</h2><div class="grid"><span class="label">Request</span><strong>${escape(request.method)} ${escape(requestPath(request.url))}</strong><span class="label">Response</span><strong>${request.status} ${escape(value.graph.response?.statusText ?? '')}</strong>${duration == null ? '' : `<span class="label">Duration</span><span>${duration}ms</span>`}<span class="label">Completion</span><span>${completed ? '✓ Request completed' : failure ? '⚠ Failure evidence recorded' : 'Runtime observation recorded'}</span><span class="label">Lifecycle</span><span>${escape(item.canonicalInvestigation?.investigationState ?? item.envelope?.lifecycle ?? 'NEW')}</span></div></div>
   ${section('Diagnosis', `<p>${escape(value.result.diagnosis)}</p><p><strong>Confidence: ${Math.round(value.result.confidence * 100)}%</strong></p>`)}
+  ${item.canonicalInvestigation ? section('FeltDB Canonical Lifecycle', `<div class="grid"><span class="label">Investigation</span><span>${escape(item.canonicalInvestigation.investigationState)}</span><span class="label">Remediation</span><span>${escape(item.canonicalInvestigation.remediationState)}</span><span class="label">Verification</span><span>${escape(item.canonicalInvestigation.verificationState)}</span><span class="label">Observations</span><code>${escape(canonicalObservationIds(item.canonicalInvestigation).join(', '))}</code><span class="label">Change</span><code>${escape(item.canonicalInvestigation.changeId ?? 'None')}</code><span class="label">Verification ID</span><code>${escape(item.canonicalInvestigation.verificationId ?? 'None')}</code></div>`) : ''}
   ${section('Observed Evidence', list(value.result.evidence))}
+  ${item.kind === 'canonical' && item.envelope ? section('DevTools Supplemental Evidence', `<p>${escape(item.envelope.investigation.result.diagnosis)}</p>${list(item.envelope.investigation.result.evidence)}`) : ''}
   ${section('Environment', `<div class="grid"><span class="label">Page</span><span>${escape(environment?.pageUrl ?? 'Unknown')}</span><span class="label">Browser</span><span>${escape(browserName(environment?.userAgent))}</span><span class="label">Viewport</span><span>${escape(environment?.viewport ?? 'Unknown')}</span></div>`)}
   ${renderDevelopmentActivity(item)}
-  ${item.envelope.verifications?.length ? section('Browser Verification', list(item.envelope.verifications.map((verification) => `${verification.outcome}: HTTP ${verification.status} ${verification.statusText ?? ''}`))) : ''}
+  ${item.envelope?.verifications?.length ? section('Browser Verification', list(item.envelope.verifications.map((verification) => `${verification.outcome}: HTTP ${verification.status} ${verification.statusText ?? ''}`))) : ''}
   <div class="actionbar"><button data-command="openSource">Open Source</button><button data-command="viewTrace">View Trace</button><button data-command="compare">Compare</button><button data-command="investigate">Investigate</button></div>
   <p class="identity">FeltDB entity: ${escape(item.entityId)}</p>
   <script nonce="${nonce}">const vscode=acquireVsCodeApi();document.querySelectorAll('[data-command]').forEach(button=>button.addEventListener('click',()=>vscode.postMessage({command:button.dataset.command})));</script>
@@ -78,7 +80,7 @@ function renderComparison(value: RuntimeInvestigation): string {
 }
 
 function renderDevelopmentActivity(item: InvestigationItem): string {
-  const activity = item.envelope.developmentActivity ?? []
+  const activity = item.envelope?.developmentActivity ?? []
   if (!activity.length) return ''
   const files = [...new Set(activity.flatMap((entry) => entry.changedFiles.map((file) => file.path)))]
   const git = activity.at(-1)?.git

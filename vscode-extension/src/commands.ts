@@ -1,5 +1,5 @@
 import * as vscode from 'vscode'
-import type { FeltWorkspaceClient, InvestigationItem, RuntimeInvestigation } from './workspace-client.js'
+import { displayInvestigation, itemWorkspaceId, type FeltWorkspaceClient, type InvestigationItem, type RuntimeInvestigation } from './workspace-client.js'
 import type { InvestigationProvider, InvestigationTreeItem } from './investigation-provider.js'
 import { InvestigationView, sourceLocation } from './investigation-view.js'
 
@@ -42,9 +42,10 @@ export function registerCommands(context: vscode.ExtensionContext, client: FeltW
   const showSource = vscode.commands.registerCommand('feltdb.showSource', async (value: CommandItem) => {
     const item = resolveItem(value, provider)
     if (!item) return void vscode.window.showWarningMessage('Select a runtime investigation first.')
-    const location = sourceLocation(item.envelope.investigation)
+    const investigation = displayInvestigation(item)
+    const location = sourceLocation(investigation)
     const exactSource = location ? await resolveSourceUri(location.source) : undefined
-    const requestSource = exactSource ? undefined : await resolveRequestedSource(item.envelope.investigation.graph.request.url)
+    const requestSource = exactSource ? undefined : await resolveRequestedSource(investigation.graph.request.url)
     if (!exactSource && !requestSource) {
       if (location) return void showResolutionError(location.source)
       return void vscode.window.showWarningMessage('Source location unavailable\nThe runtime investigation did not identify an exact local source file.', { modal: true })
@@ -192,7 +193,7 @@ async function showResolutionError(runtimePath: string): Promise<void> {
 }
 
 function agentPrompt(item: InvestigationItem): string {
-  const value = item.envelope.investigation
+  const value = displayInvestigation(item)
   const request = value.graph.request
   const environment = value.graph.bundle?.environment
   const location = sourceLocation(value)
@@ -204,7 +205,7 @@ ${item.entityId}
 Investigation:
 ${value.id}
 Workspace:
-${item.envelope.workspaceId}
+${itemWorkspaceId(item)}
 Request:
 ${request.method} ${request.url}
 Status:

@@ -60,6 +60,7 @@ export interface EvidenceGraph {
     method: string
     url: string
     status: number
+    timingMs?: number
     protocol?: RuntimeProtocol
   }
   initiator?: {
@@ -109,4 +110,8 @@ export interface InvestigationRecord {
   firstSeenAt?: number
   lastSeenAt?: number
   localAi?: { model: string; findingId: string; generatedAt: number }
+  /** Canonical FeltDB observations correlated to this local, rich investigation. */
+  canonicalObservationIds?: string[]
+  /** Canonical FeltDB investigation; never aliases this record's local id. */
+  canonicalInvestigationId?: string
 }

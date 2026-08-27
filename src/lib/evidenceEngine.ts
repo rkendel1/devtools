@@ -204,6 +204,7 @@ export function buildEvidenceGraph(
       method: request.method,
       url: request.url,
       status: request.status,
+      timingMs: request.timingMs,
       protocol: classifyRuntimeProtocol(request),
     },
     initiator: {

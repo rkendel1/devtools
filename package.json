@@ -1,7 +1,7 @@
 {
   "name": "chrome-runtime-investigator",
   "private": true,
-  "version": "0.6.10",
+  "version": "0.6.11",
   "type": "module",
   "scripts": {
     "build:wasm": "wasm-pack build wasm-engine --target bundler",
@@ -21,7 +21,7 @@
     "demo": "node --loader ts-node/esm demo/demo.ts"
   },
   "dependencies": {
-    "@feltdb/core": "^0.6.10",
+    "@feltdb/core": "0.6.12",
     "@feltdb/development-runtime": "file:./packages/development-runtime",
     "@feltdb/webllm": "^0.6.6",
     "react": "^19.2.8",

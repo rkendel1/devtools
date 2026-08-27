@@ -7,8 +7,15 @@
  * - Message routing to content scripts and offscreen documents
  */
 
-import { connectDevelopmentWorkspace } from '@feltdb/core/workspace'
+import {
+  connectDevelopmentWorkspace,
+  LEGACY_RUNTIME_INVESTIGATION_COLLECTION,
+  type DevelopmentWorkspaceConnection,
+  type RuntimeInvestigation,
+  type RuntimeRequestObservation,
+} from '@feltdb/core/workspace'
 import { classifyInvestigationVerification } from './lib/investigationVerification'
+import type { RuntimeObservationInput } from './lib/runtimeObservation'
 
 type RuntimeMessage = {
   type: string
@@ -16,6 +23,7 @@ type RuntimeMessage = {
   payload?: unknown
   pairingCode?: string
   investigation?: unknown
+  runtimeObservationInput?: unknown
   tabId?: number
   [key: string]: unknown
 }
@@ -81,7 +89,7 @@ type WorkspaceBootstrapResult =
   | { ok: false; error: string }
 
 type InvestigationHandoffResult =
-  | { ok: true; entityId: string; workspaceId: string }
+  | { ok: true; entityId: string; workspaceId: string; canonicalObservationId?: string; canonicalInvestigationId?: string }
   | { ok: false; error: string }
 
 function isPairingCode(value: unknown): value is string {
@@ -120,7 +128,7 @@ async function handleFeltDBBootstrap(message: RuntimeMessage): Promise<Workspace
 
     console.info('[Runtime Investigator] Connected to workspace', workspace.workspaceId)
 
-    const activeVerification = (await workspace.query('runtime_investigations'))
+    const activeVerification = (await workspace.query(LEGACY_RUNTIME_INVESTIGATION_COLLECTION))
       .filter((candidate: any) => candidate?.status === 'VERIFYING' || candidate?.lifecycle === 'VERIFYING')
       .sort((a: any, b: any) => Number(b.updatedAt ?? b.sentAt ?? 0) - Number(a.updatedAt ?? a.sentAt ?? 0))[0]
 
@@ -152,10 +160,46 @@ async function handleInvestigationHandoff(message: RuntimeMessage): Promise<Inve
   }
 
   try {
+    const runtimeObservationInput = isRuntimeObservationInput(message.runtimeObservationInput)
+      ? message.runtimeObservationInput
+      : undefined
+    if (message.runtimeObservationInput != null && !runtimeObservationInput) return { ok: false, error: 'INVALID_RUNTIME_OBSERVATION_INPUT' }
+    const devtoolsInvestigation = message.investigation as any
+    let runtimeObservation: RuntimeRequestObservation | undefined
+    let canonicalInvestigation: RuntimeInvestigation | undefined
+    if (runtimeObservationInput && connection.sessionId && connection.runtimeInstanceId) {
+      canonicalInvestigation = await resolveCanonicalInvestigation(connection, devtoolsInvestigation)
+      const recordedObservation = await connection.recordRuntimeObservation({
+        ...runtimeObservationInput,
+        correlation: {
+          source: {
+            product: 'feltdb-devtools',
+            clientId: connection.clientId,
+            investigationId: devtoolsInvestigation.id,
+          },
+        },
+      })
+      runtimeObservation = recordedObservation
+      canonicalInvestigation = canonicalInvestigation
+        ? await connection.linkRuntimeObservationToInvestigation(recordedObservation.observationId, canonicalInvestigation.id)
+        : await connection.createRuntimeInvestigation({ observationId: recordedObservation.observationId })
+    }
+
+    // New automatic work is canonical-only. The explicit Send to IDE action
+    // retains the legacy rich-envelope behavior for compatibility.
+    if (message.type === 'runtime-investigator:observe' && canonicalInvestigation && runtimeObservation) {
+      return {
+        ok: true,
+        entityId: canonicalInvestigation?.id ?? '',
+        workspaceId: extensionWorkspace.workspaceId,
+        canonicalObservationId: runtimeObservation?.observationId,
+        canonicalInvestigationId: canonicalInvestigation?.id,
+      }
+    }
     const incoming = message.investigation as { graph?: { request?: { method?: string; url?: string; status?: number }; response?: { statusText?: string } } }
     const request = incoming.graph?.request
     const active = request?.method && request.url
-      ? (await connection.query('runtime_investigations'))
+      ? (await connection.query(LEGACY_RUNTIME_INVESTIGATION_COLLECTION))
           .filter((candidate: any) =>
             ['INVESTIGATING', 'VERIFYING'].includes(candidate?.lifecycle)
             && candidate?.developmentActivity?.length > 0
@@ -180,15 +224,25 @@ async function handleInvestigationHandoff(message: RuntimeMessage): Promise<Inve
       createdAt: Date.now(),
       updatedAt: Date.now(),
       originalObservationId: (message.investigation as any).requestId ?? (message.investigation as any).id,
+      ...((message.investigation as any).canonicalObservationIds?.length
+        ? {
+            canonicalObservationIds: [...new Set([
+              ...((message.investigation as any).canonicalObservationIds ?? []),
+            ])],
+            ...((message.investigation as any).canonicalInvestigationId
+              ? { canonicalInvestigationId: (message.investigation as any).canonicalInvestigationId }
+              : {}),
+          }
+        : {}),
       history: [{ type: 'OBSERVATION_CAPTURED', at: Date.now(), data: { observationId: (message.investigation as any).requestId } }],
       delivery: message.type === 'runtime-investigator:send-to-ide' ? 'manual' : 'automatic',
       investigation: structuredClone(message.investigation),
       ...(active?.entityId ? { verificationOf: active.entityId } : {}),
     }
-    const entityId = await connection.publish('runtime_investigations', envelope)
+    const entityId = await connection.publish(LEGACY_RUNTIME_INVESTIGATION_COLLECTION, envelope)
     // FeltDB assigns the durable identity. Persist it back onto the same entity so
     // clients that reconnect and query retain that identity, not a local surrogate.
-    await connection.update('runtime_investigations', entityId, { entityId })
+    await connection.update(LEGACY_RUNTIME_INVESTIGATION_COLLECTION, entityId, { entityId })
     if (active?.entityId && request) {
       const outcome = classifyInvestigationVerification(
         {
@@ -212,7 +266,7 @@ async function handleInvestigationHandoff(message: RuntimeMessage): Promise<Inve
         statusText: incoming.graph?.response?.statusText,
         outcome,
       }
-      await connection.update('runtime_investigations', active.entityId, {
+      await connection.update(LEGACY_RUNTIME_INVESTIGATION_COLLECTION, active.entityId, {
         lifecycle: outcome === 'FIXED' ? 'RESOLVED' : outcome === 'REGRESSION' ? 'REGRESSION' : outcome,
         status: outcome,
         updatedAt: verification.observedAt,
@@ -234,11 +288,50 @@ async function handleInvestigationHandoff(message: RuntimeMessage): Promise<Inve
       await chrome.alarms.clear(`${VERIFICATION_ALARM_PREFIX}${active.entityId}`)
       void chrome.runtime.sendMessage({ type: 'runtime-investigator:verification-result', result }).catch(() => undefined)
     }
-    return { ok: true, entityId, workspaceId: extensionWorkspace.workspaceId }
+    return {
+      ok: true,
+      entityId,
+      workspaceId: extensionWorkspace.workspaceId,
+      canonicalObservationId: runtimeObservation?.observationId,
+      canonicalInvestigationId: canonicalInvestigation?.id,
+    }
   } catch (error) {
     console.error('[Runtime Investigator] Investigation handoff failed', error)
     return { ok: false, error: error instanceof Error ? error.message : String(error) }
   }
+}
+
+function isRuntimeObservationInput(value: unknown): value is RuntimeObservationInput {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const candidate = value as Partial<RuntimeObservationInput>
+  return typeof candidate.method === 'string'
+    && typeof candidate.url === 'string'
+    && typeof candidate.status === 'number'
+    && typeof candidate.startedAt === 'number'
+    && typeof candidate.completedAt === 'number'
+}
+
+async function resolveCanonicalInvestigation(
+  connection: DevelopmentWorkspaceConnection,
+  investigation: { canonicalInvestigationId?: string; canonicalObservationIds?: string[]; id?: string },
+): Promise<RuntimeInvestigation | undefined> {
+  if (investigation.canonicalInvestigationId) {
+    const direct = await connection.getRuntimeInvestigation(investigation.canonicalInvestigationId)
+    if (direct) return direct
+  }
+  for (const observationId of investigation.canonicalObservationIds ?? []) {
+    const linked = await connection.getRuntimeInvestigationForObservation(observationId)
+    if (linked) return linked
+  }
+  if (!investigation.id) return undefined
+  const observations = await connection.query<RuntimeRequestObservation>('runtime_observation')
+  for (const observation of observations) {
+    if (observation.correlation?.source?.product !== 'feltdb-devtools'
+      || observation.correlation.source.investigationId !== investigation.id) continue
+    const linked = await connection.getRuntimeInvestigationForObservation(observation.observationId)
+    if (linked) return linked
+  }
+  return undefined
 }
 
 function requestFingerprint(url: unknown): string {
@@ -283,7 +376,7 @@ async function finishTimedOutVerification(entityId: string): Promise<void> {
   const stored = await chrome.storage.session.get(key)
   const pending = stored[key] as any
   if (!pending) return
-  const candidates = await connection.query('runtime_investigations')
+  const candidates = await connection.query(LEGACY_RUNTIME_INVESTIGATION_COLLECTION)
   const active = candidates.find((candidate: any) => candidate?.entityId === entityId)
   if (!active || (active.status !== 'VERIFYING' && active.lifecycle !== 'VERIFYING')) {
     await chrome.storage.session.remove(key)
@@ -291,7 +384,7 @@ async function finishTimedOutVerification(entityId: string): Promise<void> {
   }
   const outcome = pending.runtimeObserved ? 'NOT_REPRODUCED' : 'VERIFICATION_FAILED'
   const observedAt = Date.now()
-  await connection.update('runtime_investigations', entityId, {
+  await connection.update(LEGACY_RUNTIME_INVESTIGATION_COLLECTION, entityId, {
     lifecycle: outcome,
     status: outcome,
     updatedAt: observedAt,
