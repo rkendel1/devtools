@@ -312,6 +312,22 @@ export default function App() {
     return { entityId: response.entityId, workspaceId: response.workspaceId }
   }
 
+  async function queueInFeltSession(record: InvestigationRecord): Promise<{ entityId: string; workspaceId: string; queueRequestId: string }> {
+    let canonicalRecord = record
+    if (!canonicalRecord.canonicalInvestigationId) {
+      await sendToIde(canonicalRecord)
+      canonicalRecord = historyRef.current.find((item) => item.id === record.id) ?? record
+    }
+    if (!canonicalRecord.canonicalInvestigationId) throw new Error('Canonical investigation identity was not persisted.')
+    const response = await chrome.runtime.sendMessage({
+      type: 'runtime-investigator:queue-in-felt-session',
+      investigation: canonicalRecord,
+    })
+    if (!response?.ok) throw new Error(response?.error || 'Failed to queue investigation in Felt Session')
+    setMessage(`Queued investigation in Felt Session · ${response.entityId}`)
+    return { entityId: response.entityId, workspaceId: response.workspaceId, queueRequestId: response.queueRequestId }
+  }
+
   function exportDetails(): string {
     if (!investigation) return 'No investigation is selected.'
     const extension = exportFormat === 'json' ? 'json' : exportFormat === 'markdown' ? 'md' : 'txt'
@@ -439,7 +455,7 @@ export default function App() {
         {activeTab !== 'history' && <p className="status" aria-live="polite">{message}</p>}
 
         {activeTab === 'investigate' && <>
-        {investigation ? <InvestigationDetails key={investigation.id} record={investigation} workspaceConnected={workspaceConnected} sendToIde={sendToIde} exportFormat={exportFormat} setExportFormat={setExportFormat} copyDetails={copyDetails} exportDetails={exportDetails} reinvestigate={() => {
+        {investigation ? <InvestigationDetails key={investigation.id} record={investigation} workspaceConnected={workspaceConnected} sendToIde={sendToIde} queueInFeltSession={queueInFeltSession} exportFormat={exportFormat} setExportFormat={setExportFormat} copyDetails={copyDetails} exportDetails={exportDetails} reinvestigate={() => {
           const request = requestsRef.current.find((item) => item.id === investigation.requestId)
           if (!request) return 'The original request has expired from live memory. Select a current request above to investigate it again.'
           void investigateRequest(request)

@@ -15,6 +15,12 @@ import {
   type RuntimeRequestObservation,
 } from '@feltdb/core/workspace'
 import type { RuntimeObservationInput } from './lib/runtimeObservation'
+import {
+  createFeltSessionHandoff,
+  FELT_SESSION_HANDOFF_COLLECTION,
+  feltSessionRequestKey,
+  type FeltSessionHandoff,
+} from './lib/feltSessionHandoff'
 
 type RuntimeMessage = {
   type: string
@@ -88,7 +94,7 @@ type WorkspaceBootstrapResult =
   | { ok: false; error: string }
 
 type InvestigationHandoffResult =
-  | { ok: true; entityId: string; workspaceId: string; canonicalObservationId?: string; canonicalInvestigationId?: string }
+  | { ok: true; entityId: string; workspaceId: string; canonicalObservationId?: string; canonicalInvestigationId?: string; queueRequestId?: string }
   | { ok: false; error: string }
 
 function isPairingCode(value: unknown): value is string {
@@ -168,9 +174,34 @@ async function handleInvestigationHandoff(message: RuntimeMessage): Promise<Inve
       return { ok: false, error: 'Canonical runtime investigation unavailable: FeltDB did not provide session/runtime identity.' }
     }
     let canonicalInvestigation = await resolveCanonicalInvestigation(connection, devtoolsInvestigation)
-    if (message.type === 'runtime-investigator:send-to-ide') {
+    if (message.type === 'runtime-investigator:send-to-ide' || message.type === 'runtime-investigator:queue-in-felt-session') {
       if (!canonicalInvestigation) {
         return { ok: false, error: 'Canonical runtime investigation unavailable: capture a canonical runtime observation first.' }
+      }
+      if (message.type === 'runtime-investigator:queue-in-felt-session') {
+        const repositoryId = 'devtools'
+        const requestKey = feltSessionRequestKey(canonicalInvestigation.id, repositoryId)
+        const handoffs = await connection.query(FELT_SESSION_HANDOFF_COLLECTION) as FeltSessionHandoff[]
+        const existing = handoffs.find((candidate) => candidate.requestKey === requestKey)
+        let queueRequestId = existing?.entityId
+        if (!existing) {
+          queueRequestId = await connection.publish(FELT_SESSION_HANDOFF_COLLECTION, createFeltSessionHandoff({
+              workspaceId: extensionWorkspace.workspaceId,
+              investigationId: canonicalInvestigation.id,
+              repositoryId,
+              clientId: connection.clientId,
+              localInvestigationId: devtoolsInvestigation.id,
+            }))
+          await connection.update(FELT_SESSION_HANDOFF_COLLECTION, queueRequestId, { entityId: queueRequestId })
+        }
+        queueRequestId ??= requestKey
+        return {
+          ok: true,
+          entityId: canonicalInvestigation.id,
+          workspaceId: extensionWorkspace.workspaceId,
+          canonicalInvestigationId: canonicalInvestigation.id,
+          queueRequestId,
+        }
       }
       return {
         ok: true,
@@ -297,6 +328,13 @@ chrome.runtime.onMessage.addListener(
     }
 
     if (message?.type === 'runtime-investigator:send-to-ide') {
+      void handleInvestigationHandoff(message).then(sendResponse).catch((error) => {
+        sendResponse({ ok: false, error: String(error) })
+      })
+      return true
+    }
+
+    if (message?.type === 'runtime-investigator:queue-in-felt-session') {
       void handleInvestigationHandoff(message).then(sendResponse).catch((error) => {
         sendResponse({ ok: false, error: String(error) })
       })

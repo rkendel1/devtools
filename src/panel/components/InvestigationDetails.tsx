@@ -12,10 +12,11 @@ import { useReplay } from '../../hooks/useReplay'
 import { ReplayPanel } from '../../components/ReplayPanel'
 import { createReplayEvidenceNodes } from '../../lib/replayFeltDB'
 
-export function InvestigationDetails({ record, workspaceConnected, sendToIde, exportFormat, setExportFormat, copyDetails, exportDetails, reinvestigate, runAction, contextValid, aiModel, setAiModel, aiStatus, aiLoading, aiQuestion, setAiQuestion, aiAnswer, enhanceCurrent, askCurrent }: {
+export function InvestigationDetails({ record, workspaceConnected, sendToIde, queueInFeltSession, exportFormat, setExportFormat, copyDetails, exportDetails, reinvestigate, runAction, contextValid, aiModel, setAiModel, aiStatus, aiLoading, aiQuestion, setAiQuestion, aiAnswer, enhanceCurrent, askCurrent }: {
   record: InvestigationRecord; exportFormat: ExportFormat; setExportFormat: (format: ExportFormat) => void
   workspaceConnected: boolean
   sendToIde: (record: InvestigationRecord) => Promise<{ entityId: string; workspaceId: string }>
+  queueInFeltSession: (record: InvestigationRecord) => Promise<{ entityId: string; workspaceId: string; queueRequestId: string }>
   copyDetails: () => Promise<string>; exportDetails: () => string; reinvestigate: () => string
   runAction: (action: 'compare' | 'source' | 'trace') => string; contextValid: boolean
   aiModel: string; setAiModel: (model: string) => void; aiStatus: string; aiLoading: boolean
@@ -30,6 +31,7 @@ export function InvestigationDetails({ record, workspaceConnected, sendToIde, ex
   const [showReplayButton, setShowReplayButton] = useState(true)
   const [handoffState, setHandoffState] = useState<'idle' | 'sending' | 'sent'>('idle')
   const [handoffMessage, setHandoffMessage] = useState('')
+  const [feltSessionState, setFeltSessionState] = useState<'idle' | 'sending' | 'sent'>('idle')
   const [detailTab, setDetailTab] = useState<'summary' | 'evidence' | 'tools'>('summary')
 
   const handleSendToIde = async () => {
@@ -42,6 +44,19 @@ export function InvestigationDetails({ record, workspaceConnected, sendToIde, ex
     } catch (error) {
       setHandoffState('idle')
       setHandoffMessage(`Send failed: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
+  const handleQueueInFeltSession = async () => {
+    setFeltSessionState('sending')
+    setHandoffMessage('')
+    try {
+      const result = await queueInFeltSession(record)
+      setFeltSessionState('sent')
+      setHandoffMessage(`✓ Queued in Felt Session · ${result.entityId}`)
+    } catch (error) {
+      setFeltSessionState('idle')
+      setHandoffMessage(`Queue failed: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
 
@@ -98,6 +113,9 @@ export function InvestigationDetails({ record, workspaceConnected, sendToIde, ex
     <div className="actions">
       <button className="primary" onClick={() => void handleSendToIde()} disabled={!workspaceConnected || handoffState !== 'idle'}>
         {handoffState === 'sending' ? 'Sending…' : handoffState === 'sent' ? '✓ Sent to IDE' : 'Send to IDE'}
+      </button>
+      <button className="primary" onClick={() => void handleQueueInFeltSession()} disabled={!workspaceConnected || feltSessionState !== 'idle'}>
+        {feltSessionState === 'sending' ? 'Queueing…' : feltSessionState === 'sent' ? '✓ Queued in Felt Session' : 'Queue in Felt Session'}
       </button>
       {!workspaceConnected && <span className="meta">Connect a workspace in Settings to send this issue.</span>}
     </div>
