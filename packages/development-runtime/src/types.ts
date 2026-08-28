@@ -70,6 +70,11 @@ export interface Selection {
 
   // Optional: computed styles from browser
   computedStyle?: Record<string, string>
+
+  // Factual element context captured with the selection.
+  textContent?: string
+  elementRole?: string
+  pageUrl?: string
 }
 
 export interface SourceHints {

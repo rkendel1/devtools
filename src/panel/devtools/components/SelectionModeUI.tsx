@@ -6,17 +6,17 @@
  * This component is now a consumer of the runtime, not the implementation.
  */
 
-import React, { useEffect, useState } from 'react'
+import React, { useState } from 'react'
 import type { VisualSelection } from '../../../lib/developmentWorkspace'
-import type { Selection as RuntimeSelection } from '@feltdb/development-runtime'
 import { createSelectionId } from '../../../lib/developmentWorkspace'
 
 interface SelectionModeUIProps {
   onSelectionCaptured: (selection: VisualSelection) => void
   runtime: any // DevelopmentRuntime
+  workspaceId: string
 }
 
-export const SelectionModeUI: React.FC<SelectionModeUIProps> = ({ onSelectionCaptured, runtime }) => {
+export const SelectionModeUI: React.FC<SelectionModeUIProps> = ({ onSelectionCaptured, runtime, workspaceId }) => {
   const [selecting, setSelecting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -32,12 +32,12 @@ export const SelectionModeUI: React.FC<SelectionModeUIProps> = ({ onSelectionCap
       // Convert from runtime Selection to workspace VisualSelection
       const selection: VisualSelection = {
         id: createSelectionId(),
-        workspaceId: 'ws_devtools',
+        workspaceId,
         kind: 'visual_selection',
-        url: typeof chrome !== 'undefined' ? chrome.devtools.inspectedWindow.tabId.toString() : 'unknown',
+        url: runtimeSelection.pageUrl || 'unknown',
         selector: runtimeSelection.elementQuery,
-        elementRole: 'button', // Could detect from runtime hints
-        textContent: runtimeSelection.computedStyle?.content || 'element',
+        elementRole: runtimeSelection.elementRole,
+        textContent: runtimeSelection.textContent || 'element',
         boundingBox: runtimeSelection.boundingBox,
         domPath: runtimeSelection.elementQuery,
         nearbyElements: [],

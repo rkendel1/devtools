@@ -29,6 +29,8 @@ type RuntimeMessage = {
   pairingCode?: string
   investigation?: unknown
   runtimeObservationInput?: unknown
+  selection?: unknown
+  task?: unknown
   tabId?: number
   [key: string]: unknown
 }
@@ -231,6 +233,37 @@ async function handleInvestigationHandoff(message: RuntimeMessage): Promise<Inve
   }
 }
 
+async function handleSelectionTask(message: RuntimeMessage): Promise<{ ok: true; selectionId: string; taskId: string } | { ok: false; error: string }> {
+  const connection = extensionWorkspace?.workspace
+  if (!extensionWorkspace?.connected || !connection) return { ok: false, error: 'WORKSPACE_NOT_CONNECTED' }
+  if (!isVisualSelection(message.selection) || !isSelectionTask(message.task)) return { ok: false, error: 'INVALID_SELECTION_TASK' }
+  if (message.selection.workspaceId !== extensionWorkspace.workspaceId || message.task.workspaceId !== extensionWorkspace.workspaceId) {
+    return { ok: false, error: 'WORKSPACE_ID_MISMATCH' }
+  }
+  if (message.task.selectionId !== message.selection.id) return { ok: false, error: 'SELECTION_ID_MISMATCH' }
+  try {
+    await connection.publish('visual_selection', message.selection)
+    await connection.publish('selection_task', message.task)
+    return { ok: true, selectionId: message.selection.id, taskId: message.task.id }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+function isVisualSelection(value: unknown): value is { id: string; workspaceId: string; selector: string; url: string } {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const candidate = value as Record<string, unknown>
+  return candidate.kind === 'visual_selection' && typeof candidate.id === 'string' && typeof candidate.workspaceId === 'string'
+    && typeof candidate.selector === 'string' && typeof candidate.url === 'string'
+}
+
+function isSelectionTask(value: unknown): value is { id: string; workspaceId: string; selectionId: string; userInstruction: string } {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const candidate = value as Record<string, unknown>
+  return candidate.kind === 'selection_task' && typeof candidate.id === 'string' && typeof candidate.workspaceId === 'string'
+    && typeof candidate.selectionId === 'string' && typeof candidate.userInstruction === 'string'
+}
+
 function isRuntimeObservationInput(value: unknown): value is RuntimeObservationInput {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const candidate = value as Partial<RuntimeObservationInput>
@@ -336,6 +369,13 @@ chrome.runtime.onMessage.addListener(
 
     if (message?.type === 'runtime-investigator:queue-in-felt-session') {
       void handleInvestigationHandoff(message).then(sendResponse).catch((error) => {
+        sendResponse({ ok: false, error: String(error) })
+      })
+      return true
+    }
+
+    if (message?.type === 'runtime-investigator:publish-selection-task') {
+      void handleSelectionTask(message).then(sendResponse).catch((error) => {
         sendResponse({ ok: false, error: String(error) })
       })
       return true

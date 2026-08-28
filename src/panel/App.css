@@ -459,6 +459,42 @@ button.recording {
   margin-top: 12px;
 }
 
+.visual-selection-workflow {
+  --color-background: #111827;
+  --color-background-secondary: #1e293b;
+  --color-border: #334155;
+  --color-primary: #3b82f6;
+  --color-text: #e5e7eb;
+  --color-text-secondary: #94a3b8;
+  display: grid;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.selected-element-summary {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #111827;
+}
+
+.selected-element-summary code,
+.selected-element-summary span {
+  color: #94a3b8;
+}
+
+.selection-instruction {
+  display: grid;
+  gap: 6px;
+}
+
+.selection-instruction textarea {
+  width: 100%;
+  resize: vertical;
+}
+
 .meta {
   opacity: 0.8;
   font-size: 12px;

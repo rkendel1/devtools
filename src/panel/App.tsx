@@ -18,6 +18,7 @@ import { useMaintenance } from './hooks/useMaintenance'
 import { useScreenshots } from './hooks/useScreenshots'
 import { ScreenshotGallery } from './components/ScreenshotGallery'
 import { InvestigationDetails } from './components/InvestigationDetails'
+import { VisualSelectionWorkflow } from './components/VisualSelectionWorkflow'
 import { WorkspaceConnection } from './components/WorkspaceConnection'
 
 type ExportFormat = 'text' | 'markdown' | 'jira' | 'json'
@@ -455,6 +456,7 @@ export default function App() {
         {activeTab !== 'history' && <p className="status" aria-live="polite">{message}</p>}
 
         {activeTab === 'investigate' && <>
+        <VisualSelectionWorkflow workspaceConnected={workspaceConnected} workspaceId={workspaceId} onMessage={setMessage} />
         {investigation ? <InvestigationDetails key={investigation.id} record={investigation} workspaceConnected={workspaceConnected} sendToIde={sendToIde} queueInFeltSession={queueInFeltSession} exportFormat={exportFormat} setExportFormat={setExportFormat} copyDetails={copyDetails} exportDetails={exportDetails} reinvestigate={() => {
           const request = requestsRef.current.find((item) => item.id === investigation.requestId)
           if (!request) return 'The original request has expired from live memory. Select a current request above to investigate it again.'

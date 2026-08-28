@@ -72,36 +72,50 @@ export class ChromiumAdapter implements BrowserRuntimeAdapter {
 
     const selectionScript = `
       (function() {
-        let selectedElement = null;
-        let originalOverlay = null;
+        if (window.__feltdb_selection_cleanup__) window.__feltdb_selection_cleanup__();
+        let highlightedElement = null;
+        let previousOutline = '';
+        let previousOutlineOffset = '';
 
-        document.addEventListener('mouseover', (e) => {
+        const mouseover = (e) => {
           if (e.target !== document.body && e.target !== document.documentElement) {
+            highlightedElement = e.target;
+            previousOutline = e.target.style.outline;
+            previousOutlineOffset = e.target.style.outlineOffset;
             e.target.style.outline = '2px solid #3b82f6';
             e.target.style.outlineOffset = '2px';
           }
-        }, true);
+        };
 
-        document.addEventListener('mouseout', (e) => {
-          if (e.target !== document.body && e.target !== document.documentElement) {
-            e.target.style.outline = '';
+        const mouseout = (e) => {
+          if (e.target === highlightedElement) {
+            e.target.style.outline = previousOutline;
+            e.target.style.outlineOffset = previousOutlineOffset;
+            highlightedElement = null;
           }
-        }, true);
+        };
 
-        document.addEventListener('click', (e) => {
+        const click = (e) => {
           e.preventDefault();
           e.stopImmediatePropagation();
-
-          selectedElement = e.target;
-          console.log('[Selection] Element selected:', {
-            tag: selectedElement.tagName,
-            className: selectedElement.className,
-            id: selectedElement.id,
-          });
-
           window.__feltdb_selection_made__ = true;
-          window.__feltdb_selected_element__ = selectedElement;
-        }, true);
+          window.__feltdb_selected_element__ = e.target;
+        };
+
+        window.__feltdb_selection_cleanup__ = () => {
+          document.removeEventListener('mouseover', mouseover, true);
+          document.removeEventListener('mouseout', mouseout, true);
+          document.removeEventListener('click', click, true);
+          if (highlightedElement) {
+            highlightedElement.style.outline = previousOutline;
+            highlightedElement.style.outlineOffset = previousOutlineOffset;
+          }
+          delete window.__feltdb_selection_cleanup__;
+        };
+        delete window.__feltdb_selected_element__;
+        document.addEventListener('mouseover', mouseover, true);
+        document.addEventListener('mouseout', mouseout, true);
+        document.addEventListener('click', click, true);
       })();
     `
 
@@ -115,9 +129,8 @@ export class ChromiumAdapter implements BrowserRuntimeAdapter {
     this.selectionEnabled = false
 
     const cleanup = `
-      document.querySelectorAll('[style*="outline"]').forEach(el => {
-        el.style.outline = '';
-      });
+      if (window.__feltdb_selection_cleanup__) window.__feltdb_selection_cleanup__();
+      delete window.__feltdb_selected_element__;
     `
 
     await this.executeScript(cleanup)
@@ -133,13 +146,28 @@ export class ChromiumAdapter implements BrowserRuntimeAdapter {
     const checkSelection = async () => {
       const selected = await this.executeScript(
         `
-        if ((window as any).__feltdb_selected_element__) {
-          const el = (window as any).__feltdb_selected_element__;
+        if (window.__feltdb_selected_element__) {
+          const el = window.__feltdb_selected_element__;
           const rect = el.getBoundingClientRect();
           const style = window.getComputedStyle(el);
 
+          const buildSelector = (element) => {
+            if (element.id) return '#' + CSS.escape(element.id);
+            const path = [];
+            let current = element;
+            while (current && current !== document.body) {
+              let part = current.tagName.toLowerCase();
+              if (current.classList.length) part += '.' + Array.from(current.classList).map(value => CSS.escape(value)).join('.');
+              const siblings = current.parentElement ? Array.from(current.parentElement.children).filter(value => value.tagName === current.tagName) : [];
+              if (siblings.length > 1) part += ':nth-of-type(' + (siblings.indexOf(current) + 1) + ')';
+              path.unshift(part);
+              current = current.parentElement;
+            }
+            return path.join(' > ');
+          };
+
           return {
-            elementQuery: this.buildSelector(el),
+            elementQuery: buildSelector(el),
             boundingBox: {
               x: rect.left,
               y: rect.top,
@@ -152,6 +180,9 @@ export class ChromiumAdapter implements BrowserRuntimeAdapter {
               width: style.width,
               height: style.height,
             },
+            textContent: (el.textContent || '').trim().slice(0, 500),
+            elementRole: el.getAttribute('role') || el.tagName.toLowerCase(),
+            pageUrl: window.location.href,
           };
         }
         return null;
@@ -164,6 +195,9 @@ export class ChromiumAdapter implements BrowserRuntimeAdapter {
           elementQuery: selected.elementQuery,
           boundingBox: selected.boundingBox,
           computedStyle: selected.computedStyle,
+          textContent: selected.textContent,
+          elementRole: selected.elementRole,
+          pageUrl: selected.pageUrl,
           sourceHints: await this.detectSourceHints(selected.elementQuery),
         }
 
@@ -171,7 +205,7 @@ export class ChromiumAdapter implements BrowserRuntimeAdapter {
           this.selectionListener(selection)
         }
 
-        ;(globalThis as any).__feltdb_selected_element__ = null
+        await this.executeScript(`delete window.__feltdb_selected_element__`)
       } else if (this.selectionEnabled) {
         setTimeout(checkSelection, 100)
       }

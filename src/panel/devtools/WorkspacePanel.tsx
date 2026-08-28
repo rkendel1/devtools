@@ -193,6 +193,7 @@ export const WorkspacePanel: React.FC<WorkspacePanelProps> = ({
           <SelectionModeUI
             onSelectionCaptured={handleSelectionCaptured}
             runtime={runtime}
+            workspaceId={workspaceId}
           />
         )}
 
