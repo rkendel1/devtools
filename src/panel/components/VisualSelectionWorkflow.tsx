@@ -49,7 +49,14 @@ export function VisualSelectionWorkflow({ workspaceConnected, workspaceId, onMes
       <div className="selected-element-summary">
         <strong>Selected element</strong>
         <code>{selection.selector}</code>
-        <span>{selection.textContent || selection.elementRole || 'Element'} · {Math.round(selection.boundingBox.width)}×{Math.round(selection.boundingBox.height)}px</span>
+        <span>{selection.textContent || 'No text content'}</span>
+        <dl className="selected-element-details">
+          <div><dt>Role</dt><dd>{selection.elementRole || 'unknown'}</dd></div>
+          <div><dt>Size</dt><dd>{Math.round(selection.boundingBox.width)}×{Math.round(selection.boundingBox.height)}px</dd></div>
+          <div><dt>Position</dt><dd>{Math.round(selection.boundingBox.x)}, {Math.round(selection.boundingBox.y)}</dd></div>
+          <div><dt>Page</dt><dd>{selection.url}</dd></div>
+          {!!selection.sourceHints?.length && <div><dt>Source</dt><dd>{selection.sourceHints[0].file}:{selection.sourceHints[0].line ?? 1}</dd></div>}
+        </dl>
       </div>
       <label className="selection-instruction">
         <span>What should change?</span>

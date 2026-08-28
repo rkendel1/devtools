@@ -146,6 +146,7 @@ export class ChromiumAdapter implements BrowserRuntimeAdapter {
     const checkSelection = async () => {
       const selected = await this.executeScript(
         `
+        (() => {
         if (window.__feltdb_selected_element__) {
           const el = window.__feltdb_selected_element__;
           const rect = el.getBoundingClientRect();
@@ -186,6 +187,7 @@ export class ChromiumAdapter implements BrowserRuntimeAdapter {
           };
         }
         return null;
+        })()
       `,
         true,
       )
@@ -211,7 +213,12 @@ export class ChromiumAdapter implements BrowserRuntimeAdapter {
       }
     }
 
-    checkSelection()
+    const poll = () => {
+      void checkSelection().catch(() => {
+        if (this.selectionEnabled) setTimeout(poll, 100)
+      })
+    }
+    poll()
   }
 
   /**
@@ -294,9 +301,9 @@ export class ChromiumAdapter implements BrowserRuntimeAdapter {
       return new Promise((resolve, reject) => {
         ;(globalThis as any).chrome.devtools.inspectedWindow.eval(
           code,
-          (result: any, isException: boolean) => {
-            if (isException) {
-              reject(new Error(result))
+          (result: any, exceptionInfo: chrome.devtools.inspectedWindow.EvaluationExceptionInfo) => {
+            if (exceptionInfo?.isException) {
+              reject(new Error(exceptionInfo.description || exceptionInfo.value || String(result || 'Inspected page evaluation failed')))
             } else {
               resolve(result)
             }

@@ -485,6 +485,30 @@ button.recording {
   color: #94a3b8;
 }
 
+.selected-element-details {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px 16px;
+  margin: 4px 0 0;
+}
+
+.selected-element-details div {
+  min-width: 0;
+}
+
+.selected-element-details dt {
+  color: #64748b;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.selected-element-details dd {
+  overflow-wrap: anywhere;
+  margin: 2px 0 0;
+  color: #cbd5e1;
+  font-size: 12px;
+}
+
 .selection-instruction {
   display: grid;
   gap: 6px;
