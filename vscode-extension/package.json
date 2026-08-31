@@ -16,9 +16,11 @@
     "onView:feltdb.runtimeInvestigations",
     "onCommand:feltdb.connectWorkspace",
     "onCommand:feltdb.disconnectWorkspace",
-    "onCommand:feltdb.reconnectWorkspace"
+    "onCommand:feltdb.reconnectWorkspace",
+    "onCommand:feltdb.openProposal",
+    "onCommand:feltdb.proposalStatus"
   ],
-  "main": "./dist/extension.js",
+  "main": "./dist/vscode-extension/src/extension.js",
   "contributes": {
     "commands": [
       {
@@ -56,6 +58,14 @@
       {
         "command": "feltdb.investigateRuntimeIssue",
         "title": "FeltDB: Investigate Runtime Issue"
+      },
+      {
+        "command": "feltdb.openProposal",
+        "title": "FeltDB: Open Proposal in IDE"
+      },
+      {
+        "command": "feltdb.proposalStatus",
+        "title": "FeltDB: Proposal Repository Status"
       }
     ],
     "viewsContainers": {
