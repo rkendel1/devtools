@@ -9,23 +9,27 @@
  * repository side reads `_feltdb.Proposal` itself, which is what keeps DevTools
  * from ever holding its own copy of a proposal.
  *
- * Every request is a read. There is deliberately no request kind that writes to
- * the repository: not from Studio, not from the Proposal API, not from the IDE
- * connection. Application is `feltdb ai apply`.
+ * Every request is a read of the repository. There is deliberately no request
+ * kind that writes to the repository or to `_feltdb.Proposal`: not from Studio,
+ * not from the Proposal API, not from the IDE connection. `bind_proposal` is the
+ * one stateful kind, and the only state it touches is the DevTools session's own
+ * `activeProposalId`. Application is `feltdb ai apply`.
  */
 
-import type { ProposalRepositoryComparison } from './proposal.js'
-import type { RepositoryContext, RepositoryFile } from './repositoryContext.js'
+import type { ProposalReadiness, ProposalStatus } from './proposal.js'
+import type { ContractFingerprint, RepositoryContext, RepositoryFile, RepositoryFingerprint, SourcePlanEntry } from './repositoryContext.js'
 import { describePathRejection, resolveRepositoryPath } from './repositoryContext.js'
 
 export const PROPOSAL_BRIDGE_REQUEST_COLLECTION = 'proposal_bridge_requests'
 export const PROPOSAL_BRIDGE_RESPONSE_COLLECTION = 'proposal_bridge_responses'
 
-/** The complete request surface. All read-only, by construction. */
+/** The complete request surface. Read-only against the repository, by construction. */
 export const BRIDGE_REQUEST_KINDS = [
+  'bind_proposal',
   'repository_context',
   'read_file',
-  'proposal_comparison',
+  'proposal_context',
+  'proposal_readiness',
   'proposal_diagnostic',
   'open_in_ide',
 ] as const
@@ -43,9 +47,62 @@ export interface BridgeRequest {
   issuedAt: number
 }
 
+/** Requests that must name the proposal they act on. */
+export function requiresProposalId(request: BridgeRequestKind): boolean {
+  return request === 'proposal_context' || request === 'proposal_readiness'
+    || request === 'proposal_diagnostic' || request === 'open_in_ide'
+}
+
 export interface BridgeError {
-  code: 'unsupported_request' | 'not_connected' | 'proposal_not_found' | 'path_refused' | 'not_found' | 'failed'
+  code: 'unsupported_request' | 'not_connected' | 'proposal_not_found' | 'proposal_mismatch' | 'path_refused' | 'not_found' | 'failed'
   message: string
+}
+
+/**
+ * The DevTools session's proposal binding.
+ *
+ * A bound session answers only for that proposal, so an IDE cannot drift from
+ * "I am working on Proposal p_123" into arbitrary repository work without the
+ * developer seeing it.
+ */
+export interface ProposalBinding {
+  proposalId: string
+  status: ProposalStatus
+  boundAt: number
+}
+
+/** How long a proposal context snapshot may be treated as current. */
+export const PROPOSAL_CONTEXT_TTL_MS = 30_000
+
+/**
+ * A refreshable view of a proposal against the repository.
+ *
+ * Carries the proposal's operational fields only — status, fingerprints, plan,
+ * warnings. The narrative body (summary, intent, rationale) stays in
+ * `_feltdb.Proposal` and never travels over the bridge, so no bridge record can
+ * be mistaken for, or reassembled into, a proposal.
+ *
+ * The proposal is durable state; this snapshot is ephemeral context. It is
+ * recomputed on every request and expires — never cache it indefinitely.
+ */
+export interface ProposalContextSnapshot {
+  proposalId: string
+  status: ProposalStatus
+  contract: ContractFingerprint | null
+  flow: RepositoryFingerprint | null
+  repositoryCommit: string
+  readiness: ProposalReadiness
+  sourcePlan: SourcePlanEntry[]
+  /** Paths only. Contents come from `read_file` or the local IDE handoff. */
+  relevantFiles: string[]
+  warnings: string[]
+  refreshedAt: number
+  expiresAt: number
+}
+
+/** True once a snapshot has aged past its TTL and must be refreshed. */
+export function isProposalContextStale(snapshot: ProposalContextSnapshot, now = Date.now()): boolean {
+  return now >= snapshot.expiresAt
 }
 
 export interface BridgeResponse {
@@ -54,9 +111,14 @@ export interface BridgeResponse {
   request: BridgeRequestKind
   ok: boolean
   error?: BridgeError
+  /** The session's proposal binding at the time of the response, when bound. */
+  binding?: ProposalBinding | null
   repository?: RepositoryContext
   file?: RepositoryFile
-  comparison?: ProposalRepositoryComparison
+  /** True when a read landed outside the bound proposal's source plan. */
+  outsideSourcePlan?: boolean
+  context?: ProposalContextSnapshot
+  readiness?: ProposalReadiness
   diagnostic?: string
   opened?: { proposalId: string; relevantFiles: string[] }
   respondedAt: number
@@ -114,6 +176,7 @@ export class ProposalBridgeClient {
 
   private readonly connection: BridgeConnection
   private readonly options: ProposalBridgeClientOptions
+  private currentBinding: ProposalBinding | null = null
 
   constructor(connection: BridgeConnection, options: ProposalBridgeClientOptions = {}) {
     this.connection = connection
@@ -132,10 +195,43 @@ export class ProposalBridgeClient {
     })
   }
 
+  /** The proposal this session is bound to, as last confirmed by the repository side. */
+  get binding(): ProposalBinding | null { return this.currentBinding }
+
+  /**
+   * Bind this session to a proposal.
+   *
+   * Once bound, every request is evaluated against that proposal and the
+   * repository side refuses requests naming a different one.
+   */
+  async bindProposal(proposalId: string): Promise<ProposalBinding> {
+    const response = await this.send('bind_proposal', { proposalId })
+    if (!response.binding) throw bridgeError(response, `The bridge did not bind proposal ${proposalId}.`)
+    return response.binding
+  }
+
+  /** Release the binding, so the session answers for the repository generally again. */
+  async unbindProposal(): Promise<void> {
+    await this.send('bind_proposal', {})
+  }
+
   async getRepositoryContext(): Promise<RepositoryContext> {
     const response = await this.send('repository_context', {})
     if (!response.repository) throw bridgeError(response, 'The bridge returned no repository context.')
     return response.repository
+  }
+
+  /**
+   * Refresh the proposal's context against the repository.
+   *
+   * Always round-trips: the proposal is durable state and may have gone stale,
+   * been rejected, or expired since the last call. Callers must not hold the
+   * result past `expiresAt`.
+   */
+  async getProposalContext(proposalId: string): Promise<ProposalContextSnapshot> {
+    const response = await this.send('proposal_context', { proposalId })
+    if (!response.context) throw bridgeError(response, `The bridge returned no context for ${proposalId}.`)
+    return response.context
   }
 
   async readFile(path: string): Promise<RepositoryFile> {
@@ -146,10 +242,10 @@ export class ProposalBridgeClient {
     return response.file
   }
 
-  async compareProposal(proposalId: string): Promise<ProposalRepositoryComparison> {
-    const response = await this.send('proposal_comparison', { proposalId })
-    if (!response.comparison) throw bridgeError(response, `The bridge returned no comparison for ${proposalId}.`)
-    return response.comparison
+  async getProposalReadiness(proposalId: string): Promise<ProposalReadiness> {
+    const response = await this.send('proposal_readiness', { proposalId })
+    if (!response.readiness) throw bridgeError(response, `The bridge returned no readiness result for ${proposalId}.`)
+    return response.readiness
   }
 
   async proposalDiagnostic(proposalId: string): Promise<string> {
@@ -168,6 +264,7 @@ export class ProposalBridgeClient {
   dispose(): void {
     this.unsubscribe?.()
     this.unsubscribe = undefined
+    this.currentBinding = null
     for (const waiting of this.pending.values()) {
       clearTimeout(waiting.timer)
       waiting.reject(new Error('The proposal bridge was disconnected.'))
@@ -195,6 +292,7 @@ export class ProposalBridgeClient {
     })
     await this.connection.publish(PROPOSAL_BRIDGE_REQUEST_COLLECTION, envelope)
     const response = await settled
+    if (response.binding !== undefined) this.currentBinding = response.binding
     if (!response.ok) throw new Error(response.error?.message ?? `The proposal bridge refused ${request}.`)
     return response
   }

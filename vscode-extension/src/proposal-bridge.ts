@@ -11,7 +11,7 @@ import { sendPromptToAgent } from './commands.js'
 import { ProposalBridgeService } from './proposal-bridge-service.js'
 import { RepositoryContextProvider } from './repository-context.js'
 import type { FeltWorkspaceClient } from './workspace-client.js'
-import { isProposalActionable, renderProposalStatus, type Proposal } from '../../src/lib/proposal.js'
+import { isProposalActionable, renderProposalStatus, renderSourcePlanConflicts, type Proposal } from '../../src/lib/proposal.js'
 import { renderProposalAgentPrompt } from '../../src/lib/proposalContext.js'
 
 export class ProposalBridge implements vscode.Disposable {
@@ -35,6 +35,9 @@ export class ProposalBridge implements vscode.Disposable {
         await sendPromptToAgent(renderProposalAgentPrompt(context))
       },
       onProposalChanged: (proposal) => this.announce(proposal),
+      onSourcePlanDrift: (path, proposalId) => {
+        this.output.appendLine(`Proposal ${proposalId}: read ${path}, which is outside the proposal source plan.`)
+      },
     })
     this.service.start()
   }
@@ -55,8 +58,15 @@ export class ProposalBridge implements vscode.Disposable {
     const id = proposalId ?? await this.askForProposalId('Open proposal in IDE')
     if (!id) return
     try {
+      // Binds the session, so later repository requests are evaluated against
+      // this proposal rather than answering for the repository generally.
       const context = await this.service.proposalContext(id)
       await sendPromptToAgent(renderProposalAgentPrompt(context))
+      this.output.appendLine(renderSourcePlanConflicts(context.readiness))
+      if (context.readiness.sourceConflicts.length) {
+        void vscode.window.showWarningMessage(`Proposal ${id} conflicts with ${context.readiness.sourceConflicts.length} locally modified file(s). Review before applying.`, 'Show')
+          .then((choice) => { if (choice === 'Show') this.output.show(true) })
+      }
       if (context.status !== 'APPROVED') {
         void vscode.window.showInformationMessage(`Proposal ${id} is ${context.status}. Review only — approval happens in Studio, and application is \`feltdb ai apply ${id}\`.`)
       }

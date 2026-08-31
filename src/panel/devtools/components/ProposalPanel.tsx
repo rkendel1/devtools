@@ -10,14 +10,13 @@
  */
 
 import React from 'react'
-import type { Proposal, ProposalRepositoryComparison } from '../../../lib/proposal'
+import type { FingerprintState, Proposal, ProposalReadiness } from '../../../lib/proposal'
 import { isProposalActionable, proposalRequiresApproval } from '../../../lib/proposal'
-import type { RepositoryContext } from '../../../lib/repositoryContext'
 
 interface ProposalPanelProps {
   proposal: Proposal
-  comparison: ProposalRepositoryComparison | null
-  repository: RepositoryContext | null
+  /** The same canonical readiness result the CLI renders. */
+  readiness: ProposalReadiness | null
   busy?: string | null
   error?: string | null
   onPreview: () => void
@@ -25,12 +24,11 @@ interface ProposalPanelProps {
   onApprove: () => void
 }
 
-const FRESHNESS_LABEL = { matches: '✓ matches', stale: '⚠ stale', unknown: '· unknown' } as const
+const FRESHNESS_LABEL: Record<FingerprintState, string> = { current: '✓ matches', stale: '⚠ stale', unrecorded: '· not recorded' }
 
 export const ProposalPanel: React.FC<ProposalPanelProps> = ({
   proposal,
-  comparison,
-  repository,
+  readiness,
   busy,
   error,
   onPreview,
@@ -38,8 +36,8 @@ export const ProposalPanel: React.FC<ProposalPanelProps> = ({
   onApprove,
 }) => {
   const actionable = isProposalActionable(proposal)
-  const repositoryLabel = comparison
-    ? comparison.repository === 'clean' ? '✓ clean' : comparison.repository === 'modified' ? '⚠ working tree modified' : '· unknown'
+  const repositoryLabel = readiness
+    ? readiness.repository.state === 'clean' ? '✓ clean' : readiness.repository.state === 'modified' ? '⚠ working tree modified' : '· unknown'
     : '· not connected'
 
   return (
@@ -51,22 +49,29 @@ export const ProposalPanel: React.FC<ProposalPanelProps> = ({
       <p className="proposal-summary">{proposal.summary}</p>
 
       <div className="proposal-freshness">
-        <div className="freshness-row"><span className="label">Contract</span><span>{comparison ? FRESHNESS_LABEL[comparison.contract] : '· not connected'}</span></div>
-        <div className="freshness-row"><span className="label">Flow</span><span>{comparison ? FRESHNESS_LABEL[comparison.flow] : '· not connected'}</span></div>
+        <div className="freshness-row"><span className="label">Contract</span><span>{readiness ? FRESHNESS_LABEL[readiness.contract] : '· not connected'}</span></div>
+        <div className="freshness-row"><span className="label">Flow</span><span>{readiness ? FRESHNESS_LABEL[readiness.flow] : '· not connected'}</span></div>
         <div className="freshness-row"><span className="label">Repository</span><span>{repositoryLabel}</span></div>
       </div>
 
-      {repository && (
+      {readiness && (
         <div className="proposal-repository">
-          <div><span className="label">Branch</span><code>{repository.repository.branch || 'unknown'}</code></div>
-          <div><span className="label">Commit</span><code>{repository.repository.commit.slice(0, 7) || 'unknown'}</code></div>
+          <div><span className="label">Branch</span><code>{readiness.repository.branch || 'unknown'}</code></div>
+          <div><span className="label">Commit</span><code>{readiness.repository.commit.slice(0, 7) || 'unknown'}</code></div>
+          {readiness.commitEvidence.matches === false && (
+            <div className="evidence"><span className="label">Proposal commit</span><code>{(readiness.commitEvidence.proposal ?? '').slice(0, 7)}</code> (evidence only)</div>
+          )}
         </div>
       )}
 
-      {comparison?.conflicts.length ? (
+      {readiness?.sourceConflicts.length ? (
         <div className="proposal-conflicts">
-          <h4>Uncommitted changes conflict with the source plan</h4>
-          <ul>{comparison.conflicts.map((path) => <li key={path}><code>{path}</code></li>)}</ul>
+          <h4>⚠ Proposal conflict</h4>
+          <ul>
+            {readiness.sourceConflicts.map((conflict) => (
+              <li key={conflict.path}><code>{conflict.path}</code> — {conflict.change === 'untracked' ? 'added locally' : conflict.change === 'deleted' ? 'deleted locally' : 'modified locally'}, proposal plans to {conflict.planned}</li>
+            ))}
+          </ul>
         </div>
       ) : null}
 
@@ -90,12 +95,19 @@ export const ProposalPanel: React.FC<ProposalPanelProps> = ({
         <button type="button" onClick={onApprove} disabled={Boolean(busy) || !proposalRequiresApproval(proposal)}>Approve</button>
       </div>
 
+      {readiness?.blockers.length ? (
+        <div className="proposal-blockers">
+          <h4>Not ready to apply</h4>
+          <ul>{readiness.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul>
+        </div>
+      ) : null}
+
       {busy && <p className="proposal-status">{busy}</p>}
       {error && <p className="proposal-error">{error}</p>}
 
       {proposal.status === 'APPROVED' && (
         <div className="proposal-apply">
-          <p>Approved. Apply from your repository:</p>
+          <p>{readiness?.ready === false ? 'Approved, but the repository is not ready. Resolve the items above, then apply:' : 'Approved. Apply from your repository:'}</p>
           <code>feltdb ai apply {proposal.proposal_id}</code>
         </div>
       )}

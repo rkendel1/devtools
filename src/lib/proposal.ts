@@ -10,7 +10,8 @@
  * Neither Studio, the DevTools bridge, nor the IDE connection applies anything.
  */
 
-import type { RepositoryContext, SourcePlanEntry } from './repositoryContext.js'
+import type { RepositoryChange, RepositoryContext, SourcePlanEntry } from './repositoryContext.js'
+import { isSecretPath } from './repositoryContext.js'
 
 /** The canonical FeltDB collection. DevTools reads from it and never writes to it. */
 export const PROPOSAL_COLLECTION = '_feltdb.Proposal'
@@ -64,73 +65,157 @@ export function proposalRequiresApproval(proposal: Proposal): boolean {
   return proposal.status === 'DRAFT' || proposal.status === 'PREVIEWED'
 }
 
-export type FingerprintMatch = 'matches' | 'stale' | 'unknown'
+/** Authority. A fingerprint the proposal never recorded is `unrecorded`, never assumed current. */
+export type FingerprintState = 'current' | 'stale' | 'unrecorded'
+
 export type WorkingTreeState = 'clean' | 'modified' | 'unknown'
 
-export interface ProposalRepositoryComparison {
-  proposalId: string
-  status: ProposalStatus
-  contract: FingerprintMatch
-  flow: FingerprintMatch
-  repository: WorkingTreeState
-  /** Working-tree changes that overlap the proposal source plan. */
-  conflicts: string[]
-  /** True when the repository is in a state where `feltdb ai apply` should succeed. */
-  applicable: boolean
-  reasons: string[]
+export interface SourcePlanConflict {
+  path: string
+  /** How the working tree changed the file. */
+  change: RepositoryChange['change']
+  /** What the proposal planned to do with it. */
+  planned: NonNullable<SourcePlanEntry['action']>
 }
 
 /**
- * Compare a proposal's fingerprints against the current repository.
+ * The one canonical readiness result.
  *
- * Contract and flow hashes are the application-level staleness mechanism; the
- * repository commit is contextual evidence, not an authority. A hash the
- * proposal does not carry is reported `unknown` rather than assumed current.
+ * Studio, the IDE, and `feltdb ai proposal` all render this same structure —
+ * there is no separate CLI model and no separate Studio model.
+ *
+ * Readiness is decided by the contract hash, the flow hash, the working tree,
+ * and the source-plan conflicts. The repository commit is carried as evidence
+ * and is structurally incapable of deciding anything: it can only ever appear
+ * in `notes`.
  */
-export function compareProposalToRepository(
+export interface ProposalReadiness {
+  proposalId: string
+  status: ProposalStatus
+  /** Authority. */
+  contract: FingerprintState
+  /** Authority. */
+  flow: FingerprintState
+  repository: {
+    state: WorkingTreeState
+    branch: string
+    commit: string
+    changedFileCount: number
+  }
+  /** Evidence only. Git history never determines whether a proposal is applicable. */
+  commitEvidence: { proposal?: string; current: string; matches: boolean | null }
+  sourceConflicts: SourcePlanConflict[]
+  /** Credential paths that reached the context. Always empty; asserted, not assumed. */
+  secretsExposed: string[]
+  ready: boolean
+  /** Why `ready` is false. Empty when ready. */
+  blockers: string[]
+  /** Observations that do not affect readiness, including commit drift. */
+  notes: string[]
+  evaluatedAt: number
+}
+
+/**
+ * Evaluate a proposal against the current repository.
+ *
+ * Contract and flow hashes are the application-level staleness mechanism. The
+ * repository commit is contextual evidence: a proposal generated at a different
+ * commit is still applicable when the contract and flow it was generated
+ * against are unchanged.
+ */
+export function evaluateProposalReadiness(
   proposal: Proposal,
   context: RepositoryContext,
-): ProposalRepositoryComparison {
-  const contract = matchFingerprint(proposal.base_contract_hash, context.contract?.hash)
-  const flow = matchFingerprint(proposal.base_flow_hash, context.flow?.hash)
-  const repository: WorkingTreeState = !context.repository.gitAvailable ? 'unknown' : context.repository.dirty ? 'modified' : 'clean'
-  const planned = new Set((proposal.source_plan ?? []).map((entry) => entry.path?.replaceAll('\\', '/')).filter(Boolean))
-  const conflicts = context.repository.changedFiles
-    .map((change) => change.path.replaceAll('\\', '/'))
-    .filter((path) => planned.has(path))
-    .sort()
+): ProposalReadiness {
+  const contract = fingerprintState(proposal.base_contract_hash, context.contract?.hash)
+  const flow = fingerprintState(proposal.base_flow_hash, context.flow?.hash)
+  const state: WorkingTreeState = !context.repository.gitAvailable ? 'unknown' : context.repository.dirty ? 'modified' : 'clean'
+  const sourceConflicts = detectSourcePlanConflicts(proposal, context)
+  const secretsExposed = context.files.filter(isSecretPath)
 
-  const reasons: string[] = []
-  if (contract === 'stale') reasons.push('The application contract changed after this proposal was generated.')
-  if (flow === 'stale') reasons.push('feltdb.flow changed after this proposal was generated.')
-  if (contract === 'unknown') reasons.push('The proposal does not record a base contract hash.')
-  if (flow === 'unknown') reasons.push('The proposal does not record a base flow hash.')
-  if (repository === 'unknown') reasons.push('The connected workspace is not a git checkout, so repository state cannot be verified.')
-  if (conflicts.length) reasons.push('Repository has uncommitted changes that conflict with the proposal source plan.')
-  if (proposal.status !== 'APPROVED') reasons.push(`Proposal status is ${proposal.status}; approval is required before applying.`)
+  const blockers: string[] = []
+  const notes: string[] = []
+  if (proposal.status !== 'APPROVED') blockers.push(`Proposal status is ${proposal.status}; approval is required before applying.`)
+  if (contract === 'stale') blockers.push('The application contract changed after this proposal was generated.')
+  if (flow === 'stale') blockers.push('feltdb.flow changed after this proposal was generated.')
+  if (state === 'unknown') blockers.push('The connected workspace is not a git checkout, so repository state cannot be verified.')
+  if (sourceConflicts.length) blockers.push('Repository has uncommitted changes that conflict with the proposal source plan.')
+  if (secretsExposed.length) blockers.push('Repository context exposed a credential path. Refusing to report the proposal ready.')
+
+  if (contract === 'unrecorded') notes.push('The proposal does not record a base contract hash.')
+  if (flow === 'unrecorded') notes.push('The proposal does not record a base flow hash.')
+  if (state === 'modified' && !sourceConflicts.length) notes.push('The working tree has changes, none of which touch the source plan.')
+
+  const commitEvidence = {
+    proposal: proposal.repository_commit,
+    current: context.repository.commit,
+    matches: proposal.repository_commit && context.repository.commit ? proposal.repository_commit === context.repository.commit : null,
+  }
+  if (commitEvidence.matches === false) {
+    notes.push(`The repository moved to ${shortCommit(commitEvidence.current)} since the proposal recorded ${shortCommit(commitEvidence.proposal ?? '')}. Evidence only; the contract and flow hashes decide staleness.`)
+  }
 
   return {
     proposalId: proposal.proposal_id,
     status: proposal.status,
     contract,
     flow,
-    repository,
-    conflicts,
-    applicable: proposal.status === 'APPROVED' && contract !== 'stale' && flow !== 'stale' && !conflicts.length && repository !== 'unknown',
-    reasons,
+    repository: { state, branch: context.repository.branch, commit: context.repository.commit, changedFileCount: context.repository.changedFiles.length },
+    commitEvidence,
+    sourceConflicts,
+    secretsExposed,
+    ready: !blockers.length,
+    blockers,
+    notes,
+    evaluatedAt: Date.now(),
   }
 }
 
-function matchFingerprint(expected: string | undefined, actual: string | undefined): FingerprintMatch {
-  if (!expected || !actual) return 'unknown'
-  return expected === actual ? 'matches' : 'stale'
+/**
+ * Working-tree changes that land on a path the proposal plans to touch.
+ *
+ * The bridge only establishes that a conflict exists. It does not merge, and it
+ * does not decide what happens next: that is the CLI's call at apply time.
+ */
+function detectSourcePlanConflicts(proposal: Proposal, context: RepositoryContext): SourcePlanConflict[] {
+  const planned = new Map<string, NonNullable<SourcePlanEntry['action']>>()
+  for (const entry of proposal.source_plan ?? []) {
+    const path = normalizePath(entry?.path)
+    if (path) planned.set(path, entry.action ?? 'modify')
+  }
+  if (!planned.size) return []
+  return context.repository.changedFiles
+    .map((change) => ({ path: normalizePath(change.path), change: change.change }))
+    .filter((change): change is { path: string; change: RepositoryChange['change'] } => Boolean(change.path) && planned.has(change.path))
+    .map((change) => ({ path: change.path, change: change.change, planned: planned.get(change.path)! }))
+    .sort((a, b) => a.path.localeCompare(b.path))
+}
+
+function normalizePath(value: string | undefined): string {
+  return value ? value.replaceAll('\\', '/').replace(/^\.\//, '') : ''
+}
+
+function fingerprintState(expected: string | undefined, actual: string | undefined): FingerprintState {
+  if (!expected || !actual) return 'unrecorded'
+  return expected === actual ? 'current' : 'stale'
 }
 
 /** Studio's proposal freshness block. */
-export function renderProposalComparison(comparison: ProposalRepositoryComparison): string {
-  const mark = (value: FingerprintMatch) => value === 'matches' ? '✓ matches' : value === 'stale' ? '⚠ stale' : '· unknown'
-  const repository = comparison.repository === 'clean' ? '✓ clean' : comparison.repository === 'modified' ? '⚠ working tree modified' : '· unknown'
-  return ['PROPOSAL', 'Contract', mark(comparison.contract), 'Flow', mark(comparison.flow), 'Repository', repository].join('\n')
+export function renderProposalReadiness(readiness: ProposalReadiness): string {
+  const mark = (value: FingerprintState) => value === 'current' ? '✓ matches' : value === 'stale' ? '⚠ stale' : '· not recorded'
+  const repository = readiness.repository.state === 'clean' ? '✓ clean' : readiness.repository.state === 'modified' ? '⚠ working tree modified' : '· unknown'
+  return ['PROPOSAL', 'Contract', mark(readiness.contract), 'Flow', mark(readiness.flow), 'Repository', repository].join('\n')
+}
+
+/** The source-plan conflict block, shown before the developer reaches apply. */
+export function renderSourcePlanConflicts(readiness: ProposalReadiness): string {
+  if (!readiness.sourceConflicts.length) return 'No source plan conflicts.'
+  return ['⚠ Proposal conflict', ...readiness.sourceConflicts.map((conflict) => `${conflict.path}\n  ${describeConflict(conflict)}`)].join('\n')
+}
+
+function describeConflict(conflict: SourcePlanConflict): string {
+  const local = conflict.change === 'untracked' ? 'added locally' : conflict.change === 'deleted' ? 'deleted locally' : conflict.change === 'created' ? 'created locally' : conflict.change === 'renamed' ? 'renamed locally' : 'modified locally'
+  return `${local}, proposal plans to ${conflict.planned}`
 }
 
 /** The proposal status the IDE displays for the connected proposal. */
@@ -157,36 +242,38 @@ export function renderRepositoryState(context: RepositoryContext): string {
 }
 
 /**
- * The `feltdb ai proposal <proposal-id>` diagnostic.
+ * The `feltdb ai proposal <proposal-id>` report.
  *
- * A read-only report: it states whether the repository is in a position to
- * apply the proposal. Application itself remains `feltdb ai apply`.
+ * Rendered from the readiness result, so the CLI and Studio show the same
+ * verdict from the same structure. Read-only: it states whether the repository
+ * is in a position to apply the proposal, never applies it.
  */
-export function renderProposalDiagnostic(
-  proposal: Proposal,
-  context: RepositoryContext,
-  comparison = compareProposalToRepository(proposal, context),
-): string {
-  const fingerprint = (value: FingerprintMatch) => value === 'matches' ? '  ✓ current' : value === 'stale' ? '  ⚠ stale' : '  · not recorded'
+export function renderProposalDiagnostic(readiness: ProposalReadiness): string {
+  const fingerprint = (value: FingerprintState) => value === 'current' ? '  ✓ current' : value === 'stale' ? '  ⚠ stale' : '  · not recorded'
   const lines = [
-    `Proposal: ${proposal.proposal_id}`,
-    `Status: ${proposal.status}`,
-    'Contract:', fingerprint(comparison.contract),
-    'Flow:', fingerprint(comparison.flow),
+    `Proposal: ${readiness.proposalId}`,
+    `Status: ${readiness.status}`,
+    'Contract:', fingerprint(readiness.contract),
+    'Flow:', fingerprint(readiness.flow),
     'Repository:',
-    `  Branch: ${context.repository.branch || 'unknown'}`,
-    `  Commit: ${shortCommit(context.repository.commit)}`,
-    `  Working tree: ${!context.repository.gitAvailable ? 'unknown' : context.repository.dirty ? `${context.repository.changedFiles.length} modified` : 'clean'}`,
+    `  Branch: ${readiness.repository.branch || 'unknown'}`,
+    `  Commit: ${shortCommit(readiness.repository.commit)}`,
+    `  Working tree: ${readiness.repository.state === 'unknown' ? 'unknown' : readiness.repository.state === 'modified' ? `${readiness.repository.changedFileCount} modified` : 'clean'}`,
   ]
-  if (comparison.applicable) return [...lines, 'Ready to apply.'].join('\n')
-  if (comparison.conflicts.length) {
-    lines.push('Repository has uncommitted changes that conflict', 'with the proposal source plan.')
-    for (const path of comparison.conflicts) lines.push(`  ${path}`)
-    lines.push('Apply aborted.')
-    return lines.join('\n')
+  if (readiness.commitEvidence.matches === false) lines.push(`  Proposal commit: ${shortCommit(readiness.commitEvidence.proposal ?? '')} (evidence only)`)
+  lines.push('Source plan conflicts:')
+  if (readiness.sourceConflicts.length) for (const conflict of readiness.sourceConflicts) lines.push(`  ⚠ ${conflict.path} — ${describeConflict(conflict)}`)
+  else lines.push('  none')
+  lines.push('Secrets exposed:')
+  if (readiness.secretsExposed.length) for (const path of readiness.secretsExposed) lines.push(`  ⚠ ${path}`)
+  else lines.push('  none')
+
+  if (readiness.ready) return [...lines, 'Ready to apply.'].join('\n')
+  if (readiness.sourceConflicts.length) {
+    return [...lines, 'Repository has uncommitted changes that conflict', 'with the proposal source plan.', 'Apply aborted.'].join('\n')
   }
   lines.push('Not ready to apply.')
-  for (const reason of comparison.reasons) lines.push(`  ${reason}`)
+  for (const blocker of readiness.blockers) lines.push(`  ${blocker}`)
   return lines.join('\n')
 }
 

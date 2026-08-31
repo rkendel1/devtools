@@ -11,9 +11,8 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react'
-import { PROPOSAL_COLLECTION, isProposal, type Proposal, type ProposalRepositoryComparison } from '../../lib/proposal'
-import { ProposalBridgeClient, type BridgeConnection } from '../../lib/proposalBridge'
-import type { RepositoryContext } from '../../lib/repositoryContext'
+import { PROPOSAL_COLLECTION, isProposal, type Proposal, type ProposalReadiness } from '../../lib/proposal'
+import { ProposalBridgeClient, isProposalContextStale, type BridgeConnection, type ProposalContextSnapshot } from '../../lib/proposalBridge'
 import { ProposalPanel } from './components/ProposalPanel'
 
 interface ProposalWorkspacePanelProps {
@@ -26,8 +25,7 @@ interface ProposalWorkspacePanelProps {
 export const ProposalWorkspacePanel: React.FC<ProposalWorkspacePanelProps> = ({ connection, proposalId, onApprove }) => {
   const [client] = useState(() => new ProposalBridgeClient(connection, { clientId: 'devtools-studio' }))
   const [proposal, setProposal] = useState<Proposal | null>(null)
-  const [comparison, setComparison] = useState<ProposalRepositoryComparison | null>(null)
-  const [repository, setRepository] = useState<RepositoryContext | null>(null)
+  const [snapshot, setSnapshot] = useState<ProposalContextSnapshot | null>(null)
   const [busy, setBusy] = useState<string | null>('Loading proposal…')
   const [error, setError] = useState<string | null>(null)
 
@@ -49,14 +47,13 @@ export const ProposalWorkspacePanel: React.FC<ProposalWorkspacePanelProps> = ({ 
     return () => { active = false; unsubscribe(); client.dispose() }
   }, [client, connection, proposalId])
 
+  // The proposal is durable state; this snapshot is not. Always round-trip
+  // rather than reusing a snapshot that may have aged past its TTL.
   const preview = useCallback(async () => {
     setBusy('Reading repository context…')
     setError(null)
-    try {
-      const [context, freshness] = await Promise.all([client.getRepositoryContext(), client.compareProposal(proposalId)])
-      setRepository(context)
-      setComparison(freshness)
-    } catch (cause) { setError(describe(cause)) }
+    try { setSnapshot(await client.getProposalContext(proposalId)) }
+    catch (cause) { setError(describe(cause)) }
     finally { setBusy(null) }
   }, [client, proposalId])
 
@@ -64,7 +61,10 @@ export const ProposalWorkspacePanel: React.FC<ProposalWorkspacePanelProps> = ({ 
     setBusy('Sending proposal context to the connected IDE…')
     setError(null)
     try {
+      // Binding first is what keeps the IDE session tied to this proposal.
+      await client.bindProposal(proposalId)
       const opened = await client.openInIde(proposalId)
+      setSnapshot(await client.getProposalContext(proposalId))
       setBusy(`Opened in IDE with ${opened.relevantFiles.length} relevant files.`)
     } catch (cause) { setError(describe(cause)); setBusy(null) }
   }, [client, proposalId])
@@ -73,18 +73,22 @@ export const ProposalWorkspacePanel: React.FC<ProposalWorkspacePanelProps> = ({ 
     if (!proposal || !onApprove) return
     setBusy('Approving…')
     setError(null)
-    try { await onApprove(proposal) }
+    try {
+      await onApprove(proposal)
+      setSnapshot(await client.getProposalContext(proposalId))
+    }
     catch (cause) { setError(describe(cause)) }
     finally { setBusy(null) }
-  }, [onApprove, proposal])
+  }, [client, onApprove, proposal, proposalId])
 
   if (!proposal) return <div className="proposal-panel">{error ?? busy ?? 'No proposal selected.'}</div>
+
+  const readiness: ProposalReadiness | null = snapshot && !isProposalContextStale(snapshot) ? snapshot.readiness : null
 
   return (
     <ProposalPanel
       proposal={proposal}
-      comparison={comparison}
-      repository={repository}
+      readiness={readiness}
       busy={busy}
       error={error}
       onPreview={() => void preview()}

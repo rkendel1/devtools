@@ -6,7 +6,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { PROPOSAL_COLLECTION, type Proposal } from './proposal'
 import {
   BRIDGE_REQUEST_KINDS, PROPOSAL_BRIDGE_REQUEST_COLLECTION, PROPOSAL_BRIDGE_RESPONSE_COLLECTION,
-  ProposalBridgeClient, type BridgeConnection, type BridgeConnectionEvent, type BridgeRequest, type BridgeResponse,
+  PROPOSAL_CONTEXT_TTL_MS, ProposalBridgeClient, isProposalContextStale,
+  type BridgeConnection, type BridgeConnectionEvent, type BridgeRequest, type BridgeResponse,
 } from './proposalBridge'
 import { renderProposalAgentPrompt, type ProposalIdeContext } from './proposalContext'
 import { RepositoryContextProvider } from '../../vscode-extension/src/repository-context'
@@ -204,11 +205,12 @@ describe('proposal acceptance loop', () => {
     rmSync(root, { recursive: true, force: true })
   })
 
-  it('4. compares the opened proposal against the current repository', async () => {
-    const comparison = await client.compareProposal('p_123')
-    expect(comparison).toMatchObject({ proposalId: 'p_123', contract: 'matches', flow: 'matches', repository: 'clean', conflicts: [] })
-    // Not approved yet, so not applicable.
-    expect(comparison.applicable).toBe(false)
+  it('4. evaluates the opened proposal against the current repository', async () => {
+    const readiness = await client.getProposalReadiness('p_123')
+    expect(readiness).toMatchObject({ proposalId: 'p_123', contract: 'current', flow: 'current', sourceConflicts: [], secretsExposed: [] })
+    expect(readiness.repository.state).toBe('clean')
+    // Not approved yet, so not ready.
+    expect(readiness.ready).toBe(false)
   })
 
   it('5-9. opens the proposal in the IDE with contract, files, and git state', async () => {
@@ -300,12 +302,114 @@ describe('proposal acceptance loop', () => {
   })
 
   it('15. exposes no capability that could apply the proposal', () => {
-    expect([...BRIDGE_REQUEST_KINDS].sort()).toEqual(['open_in_ide', 'proposal_comparison', 'proposal_diagnostic', 'read_file', 'repository_context'])
+    expect([...BRIDGE_REQUEST_KINDS].sort()).toEqual([
+      'bind_proposal', 'open_in_ide', 'proposal_context', 'proposal_diagnostic',
+      'proposal_readiness', 'read_file', 'repository_context',
+    ])
     expect(BRIDGE_REQUEST_KINDS.some((kind) => /write|apply|approve|commit|delete/.test(kind))).toBe(false)
     expect(Object.keys(Object.getOwnPropertyDescriptors(RepositoryContextProvider.prototype)).filter((name) => /write|apply|commit|delete/i.test(name))).toEqual([])
   })
 
   it('rejects an unknown proposal instead of guessing', async () => {
-    await expect(client.compareProposal('p_missing')).rejects.toThrow(/was not found in FeltDB/i)
+    await client.unbindProposal()
+    await expect(client.getProposalReadiness('p_missing')).rejects.toThrow(/was not found in FeltDB/i)
+  })
+})
+
+describe('proposal session binding', () => {
+  let root: string
+  let workspace: MemoryWorkspace
+  let service: ProposalBridgeService
+  let client: ProposalBridgeClient
+  const drift: string[] = []
+
+  beforeAll(async () => {
+    root = createRepository()
+    const provider = new RepositoryContextProvider({ root })
+    const context = await provider.context()
+    workspace = new MemoryWorkspace()
+    service = new ProposalBridgeService({
+      connection: workspace,
+      provider,
+      onSourcePlanDrift: (path) => { drift.push(path) },
+    })
+    service.start()
+    client = new ProposalBridgeClient(workspace, { clientId: 'devtools-studio', timeoutMs: 10_000 })
+    client.start()
+    for (const id of ['p_123', 'p_456']) {
+      workspace.seed(PROPOSAL_COLLECTION, id, {
+        proposal_id: id,
+        status: 'APPROVED',
+        summary: `Proposal ${id}`,
+        base_contract_hash: context.contract!.hash,
+        base_flow_hash: context.flow!.hash,
+        source_plan: [{ path: 'src/auth.ts', action: 'modify' }],
+      } satisfies Proposal)
+    }
+  })
+
+  afterAll(() => {
+    client.dispose()
+    service.stop()
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('starts unbound and adopts no proposal on its own', () => {
+    expect(service.activeProposalId).toBeUndefined()
+    expect(service.binding).toBeNull()
+  })
+
+  it('binds the session to one proposal', async () => {
+    const binding = await client.bindProposal('p_123')
+    expect(binding).toMatchObject({ proposalId: 'p_123', status: 'APPROVED' })
+    expect(service.activeProposalId).toBe('p_123')
+    expect(client.binding?.proposalId).toBe('p_123')
+  })
+
+  it('refuses requests for a different proposal while bound', async () => {
+    await expect(client.getProposalReadiness('p_456')).rejects.toThrow(/bound to proposal p_123/i)
+    await expect(client.getProposalContext('p_456')).rejects.toThrow(/bound to proposal p_123/i)
+    await expect(client.openInIde('p_456')).rejects.toThrow(/bound to proposal p_123/i)
+    expect(service.activeProposalId).toBe('p_123')
+  })
+
+  it('flags a read that drifts outside the proposal source plan', async () => {
+    const planned = await client.readFile('src/auth.ts')
+    expect(planned.path).toBe('src/auth.ts')
+    expect(drift).not.toContain('src/auth.ts')
+
+    await client.readFile('src/routes.ts')
+    expect(drift).toContain('src/routes.ts')
+  })
+
+  it('refreshes proposal context rather than caching it', async () => {
+    const first = await client.getProposalContext('p_123')
+    expect(first).toMatchObject({ proposalId: 'p_123', status: 'APPROVED' })
+    expect(first.sourcePlan).toEqual([{ path: 'src/auth.ts', action: 'modify' }])
+    expect(first.relevantFiles).toContain('src/auth.ts')
+    expect(first.readiness.ready).toBe(true)
+    expect(first.expiresAt - first.refreshedAt).toBe(PROPOSAL_CONTEXT_TTL_MS)
+    expect(isProposalContextStale(first, first.refreshedAt)).toBe(false)
+    expect(isProposalContextStale(first, first.expiresAt)).toBe(true)
+
+    // The proposal is durable state and can move underneath the IDE.
+    workspace.seed(PROPOSAL_COLLECTION, 'p_123', { ...(await workspace.get<Proposal>(PROPOSAL_COLLECTION, 'p_123'))!, status: 'STALE' })
+    const second = await client.getProposalContext('p_123')
+    expect(second.status).toBe('STALE')
+    expect(second.readiness.ready).toBe(false)
+    expect(second.refreshedAt).toBeGreaterThanOrEqual(first.refreshedAt)
+  })
+
+  it('keeps the proposal body out of the refreshed context', async () => {
+    const snapshot = await client.getProposalContext('p_123')
+    expect(JSON.stringify(snapshot)).not.toContain('Proposal p_123')
+    expect('summary' in snapshot).toBe(false)
+    expect('intent' in snapshot).toBe(false)
+  })
+
+  it('releases the binding on request', async () => {
+    await client.unbindProposal()
+    expect(service.activeProposalId).toBeUndefined()
+    await expect(client.getProposalReadiness('p_456')).resolves.toMatchObject({ proposalId: 'p_456' })
   })
 })

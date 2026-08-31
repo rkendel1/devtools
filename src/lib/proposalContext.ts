@@ -7,8 +7,10 @@
  * apply it.
  */
 
-import type { Proposal, ProposalRepositoryComparison } from './proposal.js'
-import { compareProposalToRepository, renderProposalStatus, renderRepositoryState } from './proposal.js'
+import type { Proposal, ProposalReadiness } from './proposal.js'
+import { evaluateProposalReadiness, renderProposalStatus, renderRepositoryState, renderSourcePlanConflicts } from './proposal.js'
+import type { ProposalContextSnapshot } from './proposalBridge.js'
+import { PROPOSAL_CONTEXT_TTL_MS } from './proposalBridge.js'
 import type { RepositoryContext, RepositoryFile, SourcePlanEntry } from './repositoryContext.js'
 
 export interface ProposalIdeContext {
@@ -22,7 +24,7 @@ export interface ProposalIdeContext {
   sourcePlan: SourcePlanEntry[]
   warnings: string[]
   repository: RepositoryContext
-  comparison: ProposalRepositoryComparison
+  readiness: ProposalReadiness
   /** Resolved repository files named by the source plan. Never the whole repository. */
   relevantFiles: RepositoryFile[]
   assembledAt: number
@@ -32,6 +34,7 @@ export function buildProposalIdeContext(
   proposal: Proposal,
   repository: RepositoryContext,
   relevantFiles: RepositoryFile[],
+  readiness = evaluateProposalReadiness(proposal, repository),
 ): ProposalIdeContext {
   return {
     proposalId: proposal.proposal_id,
@@ -44,9 +47,38 @@ export function buildProposalIdeContext(
     sourcePlan: proposal.source_plan ?? [],
     warnings: proposal.warnings ?? [],
     repository,
-    comparison: compareProposalToRepository(proposal, repository),
+    readiness,
     relevantFiles,
     assembledAt: Date.now(),
+  }
+}
+
+/**
+ * The refreshable proposal context snapshot.
+ *
+ * Operational fields only: the proposal's narrative body stays in
+ * `_feltdb.Proposal`. Recomputed on every request and stamped with an
+ * expiry, because the proposal is durable state and this is not.
+ */
+export function buildProposalContextSnapshot(
+  proposal: Proposal,
+  repository: RepositoryContext,
+  relevantFiles: string[],
+  readiness = evaluateProposalReadiness(proposal, repository),
+  now = Date.now(),
+): ProposalContextSnapshot {
+  return {
+    proposalId: proposal.proposal_id,
+    status: proposal.status,
+    contract: repository.contract,
+    flow: repository.flow,
+    repositoryCommit: repository.repository.commit,
+    readiness,
+    sourcePlan: proposal.source_plan ?? [],
+    relevantFiles,
+    warnings: proposal.warnings ?? [],
+    refreshedAt: now,
+    expiresAt: now + PROPOSAL_CONTEXT_TTL_MS,
   }
 }
 
@@ -87,8 +119,9 @@ Required secret names (values are never exposed):
 ${lines(context.repository.secrets.names)}
 
 ${renderRepositoryState(context.repository)}
-Proposal freshness:
-${lines(context.comparison.reasons.length ? context.comparison.reasons : ['Contract, flow, and repository match the proposal.'])}
+${renderSourcePlanConflicts(context.readiness)}
+Proposal readiness:
+${lines(readinessLines(context.readiness))}
 
 Your job:
 Review this proposal against the actual repository. Confirm whether the source
@@ -100,6 +133,15 @@ Do not apply this proposal and do not write the proposal's changes yourself.
 Application is performed by the developer from the repository:
 feltdb ai apply ${context.proposalId}
 ${context.status === 'APPROVED' ? '' : '\nThis proposal is not approved yet. Review only.'}`
+}
+
+/**
+ * Blockers first, then evidence. The repository commit can only ever appear
+ * among the notes: git history never decides whether a proposal is applicable.
+ */
+function readinessLines(readiness: ProposalReadiness): string[] {
+  if (readiness.ready) return ['Ready to apply.', ...readiness.notes]
+  return [...readiness.blockers, ...readiness.notes]
 }
 
 function lines(values: string[]): string {

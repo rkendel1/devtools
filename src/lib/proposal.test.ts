@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
-  PROPOSAL_COLLECTION, compareProposalToRepository, isProposal, isProposalActionable,
-  proposalRequiresApproval, renderProposalComparison, renderProposalDiagnostic,
-  renderProposalStatus, renderRepositoryState, type Proposal,
+  PROPOSAL_COLLECTION, evaluateProposalReadiness, isProposal, isProposalActionable,
+  proposalRequiresApproval, renderProposalDiagnostic, renderProposalReadiness,
+  renderProposalStatus, renderRepositoryState, renderSourcePlanConflicts, type Proposal,
 } from './proposal'
 import type { RepositoryContext } from './repositoryContext'
 
@@ -52,54 +52,96 @@ describe('proposal contract', () => {
   })
 })
 
-describe('proposal versus repository', () => {
-  it('reports a fresh proposal against a clean repository as applicable', () => {
-    const comparison = compareProposalToRepository(proposal(), repository())
-    expect(comparison).toMatchObject({ contract: 'matches', flow: 'matches', repository: 'clean', conflicts: [], applicable: true })
-    expect(renderProposalComparison(comparison)).toBe('PROPOSAL\nContract\n✓ matches\nFlow\n✓ matches\nRepository\n✓ clean')
+describe('proposal readiness', () => {
+  it('reports a fresh proposal against a clean repository as ready', () => {
+    const readiness = evaluateProposalReadiness(proposal(), repository())
+    expect(readiness).toMatchObject({
+      proposalId: 'p_123', contract: 'current', flow: 'current',
+      repository: { state: 'clean', branch: 'main' }, sourceConflicts: [], secretsExposed: [], ready: true, blockers: [],
+    })
+    expect(renderProposalReadiness(readiness)).toBe('PROPOSAL\nContract\n✓ matches\nFlow\n✓ matches\nRepository\n✓ clean')
   })
 
-  it('detects a contract or flow that moved after the proposal was generated', () => {
-    const comparison = compareProposalToRepository(proposal({ base_contract_hash: 'sha256:old' }), repository())
-    expect(comparison.contract).toBe('stale')
-    expect(comparison.applicable).toBe(false)
-    expect(comparison.reasons.join(' ')).toMatch(/contract changed/i)
+  it('treats the contract hash as authority', () => {
+    const readiness = evaluateProposalReadiness(proposal({ base_contract_hash: 'sha256:old' }), repository())
+    expect(readiness.contract).toBe('stale')
+    expect(readiness.ready).toBe(false)
+    expect(readiness.blockers.join(' ')).toMatch(/contract changed/i)
+  })
+
+  it('treats the flow hash as authority', () => {
+    const readiness = evaluateProposalReadiness(proposal({ base_flow_hash: 'sha256:old' }), repository())
+    expect(readiness.flow).toBe('stale')
+    expect(readiness.ready).toBe(false)
+  })
+
+  it('treats the repository commit as evidence, never as authority', () => {
+    const readiness = evaluateProposalReadiness(proposal({ repository_commit: 'f00ba4c0ffee' }), repository())
+    expect(readiness.commitEvidence).toMatchObject({ proposal: 'f00ba4c0ffee', current: '8d91abc1234567', matches: false })
+    // Git history moved, contract and flow did not: still ready.
+    expect(readiness.ready).toBe(true)
+    expect(readiness.blockers).toEqual([])
+    expect(readiness.notes.join(' ')).toMatch(/evidence only/i)
   })
 
   it('does not assume a fingerprint the proposal never recorded', () => {
-    const comparison = compareProposalToRepository(proposal({ base_flow_hash: undefined }), repository())
-    expect(comparison.flow).toBe('unknown')
+    const readiness = evaluateProposalReadiness(proposal({ base_flow_hash: undefined }), repository())
+    expect(readiness.flow).toBe('unrecorded')
+    expect(readiness.notes.join(' ')).toMatch(/does not record a base flow hash/i)
   })
 
-  it('flags working-tree changes that overlap the source plan', () => {
+  it('detects source plan conflicts with the local working tree', () => {
     const dirty = repository({
-      repository: { root: '/w/app', branch: 'main', commit: '8d91abc', dirty: true, gitAvailable: true, changedFiles: [{ path: 'src/auth.ts', change: 'changed' }, { path: 'README.md', change: 'changed' }] },
+      repository: {
+        root: '/w/app', branch: 'main', commit: '8d91abc', dirty: true, gitAvailable: true,
+        changedFiles: [{ path: 'src/auth.ts', change: 'changed' }, { path: 'README.md', change: 'changed' }],
+      },
     })
-    const comparison = compareProposalToRepository(proposal(), dirty)
-    expect(comparison.repository).toBe('modified')
-    expect(comparison.conflicts).toEqual(['src/auth.ts'])
-    expect(comparison.applicable).toBe(false)
-    expect(renderProposalComparison(comparison)).toContain('⚠ working tree modified')
+    const readiness = evaluateProposalReadiness(proposal(), dirty)
+    expect(readiness.sourceConflicts).toEqual([{ path: 'src/auth.ts', change: 'changed', planned: 'modify' }])
+    expect(readiness.ready).toBe(false)
+    expect(renderSourcePlanConflicts(readiness)).toBe('⚠ Proposal conflict\nsrc/auth.ts\n  modified locally, proposal plans to modify')
   })
 
-  it('treats a modified but non-conflicting working tree as applicable', () => {
+  it('carries the local change kind into the conflict', () => {
+    const dirty = repository({
+      repository: {
+        root: '/w/app', branch: 'main', commit: '8d91abc', dirty: true, gitAvailable: true,
+        changedFiles: [{ path: 'src/auth.ts', change: 'deleted' }],
+      },
+    })
+    expect(evaluateProposalReadiness(proposal(), dirty).sourceConflicts[0]).toEqual({ path: 'src/auth.ts', change: 'deleted', planned: 'modify' })
+  })
+
+  it('treats a modified but non-conflicting working tree as ready, with a note', () => {
     const dirty = repository({
       repository: { root: '/w/app', branch: 'main', commit: '8d91abc', dirty: true, gitAvailable: true, changedFiles: [{ path: 'README.md', change: 'changed' }] },
     })
-    expect(compareProposalToRepository(proposal(), dirty).applicable).toBe(true)
+    const readiness = evaluateProposalReadiness(proposal(), dirty)
+    expect(readiness.ready).toBe(true)
+    expect(readiness.sourceConflicts).toEqual([])
+    expect(readiness.notes.join(' ')).toMatch(/none of which touch the source plan/i)
+    expect(renderSourcePlanConflicts(readiness)).toBe('No source plan conflicts.')
   })
 
-  it('will not call an unapproved proposal applicable', () => {
-    const comparison = compareProposalToRepository(proposal({ status: 'PREVIEWED' }), repository())
-    expect(comparison.applicable).toBe(false)
-    expect(comparison.reasons.join(' ')).toMatch(/approval is required/i)
+  it('will not call an unapproved proposal ready', () => {
+    const readiness = evaluateProposalReadiness(proposal({ status: 'PREVIEWED' }), repository())
+    expect(readiness.ready).toBe(false)
+    expect(readiness.blockers.join(' ')).toMatch(/approval is required/i)
+  })
+
+  it('refuses to report ready when a credential path reached the context', () => {
+    const leaking = repository({ files: ['feltdb.flow', '.env'] })
+    const readiness = evaluateProposalReadiness(proposal(), leaking)
+    expect(readiness.secretsExposed).toEqual(['.env'])
+    expect(readiness.ready).toBe(false)
   })
 
   it('reports unknown repository state outside a git checkout', () => {
     const detached = repository({ repository: { root: '/w/app', branch: '', commit: '', dirty: false, changedFiles: [], gitAvailable: false } })
-    const comparison = compareProposalToRepository(proposal(), detached)
-    expect(comparison.repository).toBe('unknown')
-    expect(comparison.applicable).toBe(false)
+    const readiness = evaluateProposalReadiness(proposal(), detached)
+    expect(readiness.repository.state).toBe('unknown')
+    expect(readiness.ready).toBe(false)
     expect(renderRepositoryState(detached)).toContain('not a git checkout')
   })
 })
@@ -114,26 +156,33 @@ describe('proposal reporting', () => {
     expect(renderProposalStatus(proposal({ status: 'PREVIEWED' }))).toBe('PROPOSAL p_123\nStatus: PREVIEWED\nApproval required.')
   })
 
-  it('renders the ready-to-apply diagnostic', () => {
-    expect(renderProposalDiagnostic(proposal(), repository())).toBe([
+  it('renders the ready-to-apply diagnostic from the readiness result', () => {
+    expect(renderProposalDiagnostic(evaluateProposalReadiness(proposal(), repository()))).toBe([
       'Proposal: p_123', 'Status: APPROVED', 'Contract:', '  ✓ current', 'Flow:', '  ✓ current',
-      'Repository:', '  Branch: main', '  Commit: 8d91abc', '  Working tree: clean', 'Ready to apply.',
+      'Repository:', '  Branch: main', '  Commit: 8d91abc', '  Working tree: clean',
+      'Source plan conflicts:', '  none', 'Secrets exposed:', '  none', 'Ready to apply.',
     ].join('\n'))
+  })
+
+  it('reports commit drift as evidence in the diagnostic', () => {
+    const report = renderProposalDiagnostic(evaluateProposalReadiness(proposal({ repository_commit: 'f00ba4c0ffee' }), repository()))
+    expect(report).toContain('  Proposal commit: f00ba4c (evidence only)')
+    expect(report.endsWith('Ready to apply.')).toBe(true)
   })
 
   it('aborts the diagnostic when uncommitted changes conflict with the source plan', () => {
     const dirty = repository({
       repository: { root: '/w/app', branch: 'main', commit: '8d91abc', dirty: true, gitAvailable: true, changedFiles: [{ path: 'src/auth.ts', change: 'changed' }] },
     })
-    const report = renderProposalDiagnostic(proposal(), dirty)
+    const report = renderProposalDiagnostic(evaluateProposalReadiness(proposal(), dirty))
+    expect(report).toContain('Source plan conflicts:\n  ⚠ src/auth.ts — modified locally, proposal plans to modify')
     expect(report).toContain('Repository has uncommitted changes that conflict')
     expect(report).toContain('with the proposal source plan.')
-    expect(report).toContain('  src/auth.ts')
     expect(report.endsWith('Apply aborted.')).toBe(true)
   })
 
   it('explains a stale proposal instead of aborting on conflicts', () => {
-    const report = renderProposalDiagnostic(proposal({ base_flow_hash: 'sha256:old' }), repository())
+    const report = renderProposalDiagnostic(evaluateProposalReadiness(proposal({ base_flow_hash: 'sha256:old' }), repository()))
     expect(report).toContain('Flow:\n  ⚠ stale')
     expect(report).toContain('Not ready to apply.')
   })

@@ -87,20 +87,97 @@ Containment is enforced twice: once on the requested path before any filesystem
 call, and again on the resolved real path. Files above `MAX_FILE_BYTES` are
 truncated rather than streamed whole.
 
+## Session binding
+
+A DevTools session may be bound to one proposal:
+
+```
+DevTools session
+    └── activeProposalId
+```
+
+Studio binds when it opens a proposal in the IDE. While bound:
+
+- requests naming a different proposal are refused (`proposal_mismatch`)
+- every response carries the binding, so the client can see what it is answering for
+- a `read_file` outside the proposal's source plan is flagged `outsideSourcePlan`
+  and reported to the IDE
+
+This is what stops an IDE from drifting out of "I am working on Proposal p_123"
+into arbitrary repository work without the developer noticing. An unbound
+session never adopts a proposal on its own — it only tracks one it was
+explicitly bound to.
+
 ## Three fingerprints
 
 A proposal is checked against the repository on three fingerprints:
 
 ```
 Proposal
-├── base_contract_hash   ← application-level staleness
-├── base_flow_hash       ← application-level staleness
-└── repository_commit    ← contextual evidence
+├── base_contract_hash   ← authority
+├── base_flow_hash       ← authority
+└── repository_commit    ← evidence
 ```
 
 The contract and flow hashes decide staleness. The repository commit is
-evidence, not an authority. A fingerprint the proposal never recorded is
-reported `unknown`, never assumed current.
+evidence and cannot decide anything: commit drift can only ever land in
+`ProposalReadiness.notes`, never in `blockers`. A proposal generated at a
+different commit is still applicable when the contract and flow it was
+generated against are unchanged. A fingerprint the proposal never recorded is
+`unrecorded`, never assumed current.
+
+## Readiness
+
+`ProposalReadiness` is the one canonical semantic result. Studio, the IDE, and
+`feltdb ai proposal` all render this same structure — there is no separate CLI
+model and no separate Studio model.
+
+```
+ProposalReadiness
+  contract:        current | stale | unrecorded    (authority)
+  flow:            current | stale | unrecorded    (authority)
+  repository:      clean | modified | unknown
+  commitEvidence:  { proposal, current, matches }  (evidence only)
+  sourceConflicts: []
+  secretsExposed:  []
+  ready:           true
+  blockers:        []
+  notes:           []
+```
+
+`secretsExposed` is an asserted invariant rather than an assumption: readiness
+re-checks the context it was handed for credential paths and refuses to report
+ready if one got through.
+
+## Source-plan conflict detection
+
+When a proposal plans to touch `src/auth.ts` and the developer has modified it
+locally, the bridge says so before anyone reaches apply:
+
+```
+⚠ Proposal conflict
+src/auth.ts
+  modified locally, proposal plans to modify
+```
+
+The bridge only establishes that a conflict exists. It does not merge and it
+does not decide what happens next — that is the CLI's call at apply time.
+
+## Proposal context refresh
+
+`getProposalContext(proposalId)` returns the current status, contract and flow
+fingerprints, repository commit, readiness, source plan, relevant file paths,
+and warnings.
+
+The proposal is durable state; this snapshot is ephemeral context. It is
+recomputed from FeltDB and disk on every request, never served from a cache,
+and stamped with `expiresAt` (`PROPOSAL_CONTEXT_TTL_MS`). Consumers must
+refresh rather than hold it.
+
+The snapshot carries the proposal's *operational* fields only. The narrative
+body — summary, intent, rationale — stays in `_feltdb.Proposal` and never
+travels over the bridge, so no bridge record can be mistaken for, or
+reassembled into, a proposal.
 
 ## Relevant-file discovery
 
@@ -114,8 +191,10 @@ bound matters most for local WebLLM, which cannot take a repository as input.
 ## Security model
 
 - **Workspace boundary.** Only the connected repository is inspectable.
-- **Explicit read capability.** Every request is a read; the protocol has no
-  write kind, and the repository provider has no write method.
+- **Explicit read capability.** Every request is a read of the repository; the
+  protocol has no write kind, and the repository provider has no write method.
+  `bind_proposal` is the one stateful kind, and the only state it touches is the
+  session's own `activeProposalId`.
 - **No secret exposure.** Credential paths are never listed or read. Required
   secret *names* may be reported (`STRIPE_SECRET_KEY`); a value never is.
   `.env` is read internally for its key names only.
@@ -150,6 +229,45 @@ The bridge reuses the existing `connections.json` / `pairing.json` /
 already holds for runtime investigations. There is no second connection
 registry and no second Studio↔IDE integration.
 
+## What does not belong here
+
+Two boundaries hold the architecture together, and both are easy to erode by
+accident.
+
+**`.feltdb/` stays connection and workspace tooling.**
+
+```
+.feltdb/
+├── connections.json
+├── pairing.json
+└── workspace.json
+```
+
+The proposal stays in `_feltdb.Proposal`. The bridge is the transport and
+context layer between them.
+
+**Data Explorer does not belong in DevTools.** DevTools has repository access,
+which makes it tempting to let it inspect FeltDB data too. It must not. Data
+inspection goes through the Service API; DevTools goes to the repository and the
+IDE:
+
+```
+                   Studio
+                  /      \
+                 /        \
+                ▼          ▼
+          Service API    DevTools
+                │           │
+                ▼           ▼
+             FeltDB       Git/IDE
+                │
+                ▼
+          _feltdb.Proposal
+```
+
+DevTools is a typed transport and context bridge, not the application's
+authority.
+
 ## CLI
 
 `feltdb ai proposal <proposal-id>` reports whether the repository can apply a
@@ -178,9 +296,10 @@ with the proposal source plan.
 Apply aborted.
 ```
 
-The report is produced by `renderProposalDiagnostic()` and served over the
-bridge as the `proposal_diagnostic` request, so any workspace client — the
-`feltdb` CLI included — gets byte-identical output. The `feltdb` binary itself
+The report is rendered from `ProposalReadiness` by `renderProposalDiagnostic()`
+and served over the bridge as the `proposal_diagnostic` request, with the
+structured result itself available as `proposal_readiness`. Any workspace client
+— the `feltdb` CLI included — gets the same structure and byte-identical text. The `feltdb` binary itself
 ships in `@feltdb/core` and is not part of this repository; the subcommand wiring
 belongs there. In VS Code the same report is available today as
 **FeltDB: Proposal Repository Status**.
