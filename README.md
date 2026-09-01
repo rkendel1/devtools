@@ -24,6 +24,25 @@ Chrome Runtime Investigator is a Chrome DevTools extension that turns raw browse
 - Lightweight retention: 24-hour TTL for unpinned evidence, five-minute cleanup checks, bounded collection counts, and capture-time payload truncation.
 - Rust WASM evidence engine crate scaffold (`/wasm-engine`) for deterministic normalization.
 
+## Proposal bridge
+
+The DevTools connection also carries repository context for FeltDB Proposals:
+bounded repository listing, `feltdb.flow` and contract fingerprints, git state,
+and the relevant files a proposal's source plan names. It is read-only — no
+proposal is stored in `.feltdb/`, and applying a proposal remains
+`feltdb ai apply`. See [DEVTOOLS_PROPOSAL_BRIDGE.md](DEVTOOLS_PROPOSAL_BRIDGE.md).
+
+## VS Code extension
+
+```bash
+npm run build:extension    # clean compile into vscode-extension/dist
+npm run verify:extension   # build, then verify the artifact is installable
+```
+
+The compiled distribution is self-contained: `vscode-extension/dist` carries the
+extension and the shared bridge modules it imports, and is what the `.vsix`
+ships. `dist` is generated and not committed.
+
 ## Development
 
 ```bash

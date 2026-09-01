@@ -20,11 +20,18 @@ import { SelectionModeUI } from './components/SelectionModeUI'
 import { TaskDisplay } from './components/TaskDisplay'
 import { VerificationPanel } from './components/VerificationPanel'
 import { WorkspaceStatusBar } from './components/WorkspaceStatusBar'
+import { ProposalWorkspacePanel } from './ProposalWorkspacePanel'
+import type { BridgeConnection } from '../../lib/proposalBridge'
 
 interface WorkspacePanelProps {
   workspace: any // @feltdb/core workspace
   workspaceId: string
   projectName: string
+  /** The shared workspace connection, reused for proposal repository context. */
+  bridgeConnection?: BridgeConnection
+  /** The proposal Studio currently has open, if any. */
+  proposalId?: string
+  onApproveProposal?: (proposal: import('../../lib/proposal').Proposal) => Promise<void>
 }
 
 type PanelPhase = 'idle' | 'selecting' | 'describing' | 'waiting' | 'change_detected' | 'verifying' | 'verified'
@@ -33,6 +40,9 @@ export const WorkspacePanel: React.FC<WorkspacePanelProps> = ({
   workspace,
   workspaceId,
   projectName,
+  bridgeConnection,
+  proposalId,
+  onApproveProposal,
 }) => {
   const [client] = useState(() => new DevToolsWorkspaceClient())
   const [runtime] = useState(() => new DevelopmentRuntime({
@@ -187,6 +197,14 @@ export const WorkspacePanel: React.FC<WorkspacePanelProps> = ({
         projectName={projectName}
         message={message}
       />
+
+      {bridgeConnection && proposalId && (
+        <ProposalWorkspacePanel
+          connection={bridgeConnection}
+          proposalId={proposalId}
+          onApprove={onApproveProposal}
+        />
+      )}
 
       <div className="panel-content">
         {phase === 'idle' && (

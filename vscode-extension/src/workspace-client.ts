@@ -50,6 +50,8 @@ export class FeltWorkspaceClient implements vscode.Disposable {
   readonly onInvestigation = this.emitter.event
   readonly onConnectionChanged = this.connectionEmitter.event
   get connected(): boolean { return Boolean(this.connection) }
+  /** The shared workspace connection, reused by the proposal bridge. */
+  get workspaceConnection(): DevelopmentWorkspaceConnection | undefined { return this.connection }
   get workspaceId(): string | undefined { return this.connection?.workspaceId }
   get pairingCode(): string | undefined { return this.currentPairingCode }
   get activeInvestigation(): InvestigationItem | undefined { return this.activeItem }

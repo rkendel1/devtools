@@ -3,19 +3,22 @@ import { registerCommands, restoreWorkspace } from './commands.js'
 import { InvestigationProvider, InvestigationTreeItem } from './investigation-provider.js'
 import { FeltWorkspaceClient } from './workspace-client.js'
 import { DevelopmentObserver } from './development-observer.js'
+import { ProposalBridge, registerProposalCommands } from './proposal-bridge.js'
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const client = new FeltWorkspaceClient()
   const provider = new InvestigationProvider(client)
   const developmentObserver = new DevelopmentObserver(client)
-  context.subscriptions.push(client, provider, developmentObserver)
+  const proposalBridge = new ProposalBridge(client)
+  context.subscriptions.push(client, provider, developmentObserver, proposalBridge)
+  context.subscriptions.push(client.onConnectionChanged(() => proposalBridge.refresh()))
   const tree = vscode.window.createTreeView('feltdb.runtimeInvestigations', { treeDataProvider: provider })
   context.subscriptions.push(tree)
   context.subscriptions.push(tree.onDidChangeSelection((event) => {
     const selected = event.selection[0]
     provider.select(selected instanceof InvestigationTreeItem ? selected.item : undefined)
   }))
-  context.subscriptions.push(...registerCommands(context, client, provider))
+  context.subscriptions.push(...registerCommands(context, client, provider), ...registerProposalCommands(proposalBridge))
   await vscode.commands.executeCommand('setContext', 'feltdb.connected', false)
   await restoreWorkspace(context, client, provider)
 }

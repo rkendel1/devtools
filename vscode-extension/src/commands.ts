@@ -70,24 +70,33 @@ export function registerCommands(context: vscode.ExtensionContext, client: FeltW
     if (!item) return void vscode.window.showWarningMessage('Select a runtime investigation first.')
     await client.markInvestigating(item)
     provider.updated(item)
-    const prompt = agentPrompt(item)
-    const available = await vscode.commands.getCommands(true)
-    if (available.includes('workbench.action.chat.open')) {
-      try {
-        // The unified chat command preserves the active session's selected agent
-        // (Claude, Copilot, Codex, or another registered provider). Do not call
-        // openagent here: that command creates a built-in/Copilot-biased session.
-        await vscode.commands.executeCommand('workbench.action.chat.open', {
-          query: prompt,
-          isPartialQuery: false,
-          focus: true,
-        })
-        return
-      } catch { /* Fall through to an explicit, provider-neutral handoff. */ }
-    }
-    await handoffThroughAgentPicker(prompt, available)
+    await sendPromptToAgent(agentPrompt(item))
   })
   return [connect, disconnect, reconnect, refresh, open, showSource, trace, compare, investigate]
+}
+
+/**
+ * Hand a prompt to whichever agent the developer has active.
+ *
+ * Shared by runtime investigations and proposal handoffs so both reach the same
+ * provider-neutral chat session.
+ */
+export async function sendPromptToAgent(prompt: string): Promise<void> {
+  const available = await vscode.commands.getCommands(true)
+  if (available.includes('workbench.action.chat.open')) {
+    try {
+      // The unified chat command preserves the active session's selected agent
+      // (Claude, Copilot, Codex, or another registered provider). Do not call
+      // openagent here: that command creates a built-in/Copilot-biased session.
+      await vscode.commands.executeCommand('workbench.action.chat.open', {
+        query: prompt,
+        isPartialQuery: false,
+        focus: true,
+      })
+      return
+    } catch { /* Fall through to an explicit, provider-neutral handoff. */ }
+  }
+  await handoffThroughAgentPicker(prompt, available)
 }
 
 async function handoffThroughAgentPicker(prompt: string, availableCommands: string[]): Promise<void> {
