@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  bridge:
+    name: Lint, typecheck, tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npx tsc -b
+      - run: npm test
+
+  extension:
+    name: Extension distribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+        working-directory: vscode-extension
+      - run: npm run check
+        working-directory: vscode-extension
+
+      # The gate: a green type check does not prove the built extension is
+      # installable. This builds dist/ from clean and verifies the artifact —
+      # canonical entrypoint, emitted shared modules, self-containment,
+      # deterministic rebuild, a real load, and packaged contents.
+      - name: Verify compiled distribution
+        run: npm run verify
+        working-directory: vscode-extension
+        env:
+          FELTDB_VERIFY_PACKAGE: '1'
+
+      - name: Assert canonical entrypoint
+        run: test -f vscode-extension/dist/vscode-extension/src/extension.js

@@ -304,6 +304,65 @@ ships in `@feltdb/core` and is not part of this repository; the subcommand wirin
 belongs there. In VS Code the same report is available today as
 **FeltDB: Proposal Repository Status**.
 
+## Build and distribution
+
+`dist/` is a first-class build artifact, not a by-product of the type check.
+The extension must run from compiled output alone, with no TypeScript source
+tree present.
+
+```
+npm --prefix vscode-extension run build     # clean rebuild
+npm --prefix vscode-extension run verify    # build, then check the artifact
+npm --prefix vscode-extension run package   # build, then produce a .vsix
+```
+
+The canonical entrypoint, named by the extension manifest's `main`:
+
+```
+vscode-extension/dist/
+├── src/lib/                        shared bridge modules
+│   ├── proposal.js
+│   ├── proposalBridge.js
+│   ├── proposalContext.js
+│   └── repositoryContext.js
+└── vscode-extension/src/
+    └── extension.js                ← main
+```
+
+The layout has two roots because the extension compiles the shared bridge
+modules from the repository root (`rootDir: ".."`). The emitted extension
+reaches them as `../../src/lib/*.js`, which resolves *inside* `dist/` — the
+distribution is self-contained and never reads from the source tree at runtime.
+
+`npm run build` cleans `dist/` first, so no stale JavaScript can survive a
+rename or deletion, and repeated builds produce an identical file set.
+
+`src/` is source and `dist/` is generated: `dist/` is gitignored and never
+committed.
+
+### What `verify` checks
+
+A green `tsc` does not prove the built extension is installable. The verifier
+builds from clean and then checks the artifact itself:
+
+1. the entrypoint named by `main` exists
+2. the shared bridge modules are emitted alongside it
+3. no emitted module imports outside `dist/`, and every relative import resolves
+   to a file that was actually emitted
+4. every external import is a declared dependency or a Node builtin
+5. a clean rebuild is deterministic and drops stale output
+6. the entrypoint **loads** — the whole module graph is evaluated against a
+   generated `vscode` stub, and `activate`/`deactivate` are asserted
+7. the packaging tool would ship the entrypoint and the shared modules
+
+Step 6 is the one that catches `tsc` green but extension broken: a missing
+emit, a bad specifier, or an unresolvable dependency fails here rather than at
+install time. The `vscode` stub is generated from the compiled output, so a
+newly used API cannot silently skip the check.
+
+CI runs lint, typecheck, and the test suite alongside this, so packaging cannot
+regress the bridge and the bridge cannot regress packaging.
+
 ## Acceptance test
 
 `src/lib/proposalBridge.test.ts` runs the loop against a real git repository:

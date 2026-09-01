@@ -7,6 +7,8 @@
     "build:wasm": "wasm-pack build wasm-engine --target bundler",
     "dev": "vite --host",
     "build": "npm run build:wasm && tsc -b && vite build",
+    "build:extension": "npm --prefix vscode-extension run build",
+    "verify:extension": "npm --prefix vscode-extension run verify",
     "lint": "oxlint",
     "preview": "vite preview",
     "test": "vitest run",
